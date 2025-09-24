@@ -227,4 +227,54 @@ contract PriceLoomOracle is
         require(cfg.trim == 0, "trim unsupported v0");
         require(cfg.maxPrice >= cfg.minPrice, "bounds");
     }
+
+    // Bounds check: price within [minPrice, maxPrice]
+    function _withingBounds(
+        bytes32 feedId,
+        int256 answer
+    ) internal view returns (bool) {
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        return answer >= cfg.minPrice && answer <= cfg.maxPrice;
+    }
+
+    // Absolute value helper (answers expected non-negative in v0)
+    function _absInt(int256 x) internal pure returns (uint256) {
+        return uint256(x >= 0 ? x : -x);
+    }
+
+    // Has heartbeat elapsed since last update?
+    function _heartbeatElapsed(bytes32 feedId) internal view returns (bool) {
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        if (cfg.heartbeatSec == 0) return false;
+        if (snap.updatedAt == 0) return true; // no prior answer → allow first round
+        return (block.timestamp - snap.updatedAt) >= cfg.heartbeatSec;
+    }
+
+    // Does proposed answer exceed deviation threshold vs last?
+    function _exceedsDeviation(
+        bytes32 feedId,
+        int256 proposed
+    ) internal view returns (bool) {
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        if (cfg.deviationBps == 0) return false;
+
+        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        if (snap.updatedAt == 0) return true; // no prior answer → allow first round
+
+        uint256 lastAbs = _absInt(snap.answer);
+        uint256 denom = lastAbs > 0 ? lastAbs : 1; // avoid div by zero
+        uint256 diff = _absInt(proposed - snap.answer);
+
+        // diff / last >= deviationBps / 10_000
+        return (diff * 10_000) / denom >= cfg.deviationBps;
+    }
+
+    // Gate to decide if a new round should start on next submission
+    function _shouldStartNewRound(
+        bytes32 feedId,
+        int256 proposed
+    ) internal view returns (bool) {
+        return _heartbeatElapsed(feedId) || _exceedsDeviation(feedId, proposed);
+    }
 }
