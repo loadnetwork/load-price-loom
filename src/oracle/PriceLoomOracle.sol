@@ -32,11 +32,26 @@ contract PriceLoomOracle is
             "PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)"
         );
 
+    modifier onlyFeedOperator(bytes32 feedId) {
+        _onlyFeedOperator(feedId);
+        _;
+    }
+
+    function _onlyFeedOperator(bytes32 feedId) internal view {
+        require(_opIndex[feedId][msg.sender] != 0, "not operator");
+    }
+
     // Storage
     mapping(bytes32 => OracleTypes.FeedConfig) private _feedConfig;
     mapping(bytes32 => mapping(address => uint8)) private _opIndex; // 1-based index; 0 = not an operator
     mapping(bytes32 => address[]) private _operators; // operators per feed
     mapping(bytes32 => OracleTypes.RoundData) private _latestSnapshot; // latest finalized per feed
+
+    // Working state for open rounds (per feedId, per round)
+    mapping(bytes32 => mapping(uint80 => uint256)) private _submittedBitmap; // dedupe operators (1 bit per index)
+    mapping(bytes32 => mapping(uint80 => mapping(uint8 => int256)))
+        private _answers; // answers[feedId][roundId][i]
+    mapping(bytes32 => mapping(uint80 => uint8)) private _answerCount; // count per open round
 
     // Open-round tracking (utilized when we add submissions)
     mapping(bytes32 => uint80) private _latestRoundId;
@@ -47,6 +62,22 @@ contract PriceLoomOracle is
     event FeedConfigUpdated(bytes32 indexed feedId, OracleTypes.FeedConfig cfg);
     event OperatorAdded(bytes32 indexed feedId, address op);
     event OperatorRemoved(bytes32 indexed feedId, address op);
+    event SubmissionReceived(
+        bytes32 indexed feedId,
+        uint80 indexed roundId,
+        address indexed operator,
+        int256 answer
+    );
+    event RoundFinalized(
+        bytes32 indexed feedId,
+        uint80 indexed roundId,
+        uint8 submissionCount
+    );
+    event PriceUpdated(
+        bytes32 indexed feedId,
+        int256 answer,
+        uint256 updatedAt
+    );
 
     constructor(address admin) EIP712("Price Loom", "1") {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
@@ -211,6 +242,120 @@ contract PriceLoomOracle is
         return PRICE_SUBMISSION_TYPEHASH;
     }
 
+    function submitPrice(
+        bytes32 feedId,
+        int256 answer,
+        uint256 validUntil
+    ) external whenNotPaused nonReentrant onlyFeedOperator(feedId) {
+        // basic feed + bounds checks
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        require(cfg.decimals != 0, "no feed");
+        require(block.timestamp <= validUntil, "expired");
+        require(_withinBounds(feedId, answer), "out of bounds");
+
+        // round selection
+        uint80 latest = _latestRoundId[feedId];
+        uint80 openId = latest + 1;
+        bool hasOpen = _roundStartedAt[feedId][openId] != 0;
+
+        // if no open round, only start when due (or on first ever update)
+        if (!hasOpen) {
+            OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+            bool firstEver = (snap.updatedAt == 0);
+            require(
+                firstEver || _shouldStartNewRound(feedId, answer),
+                "not due"
+            );
+            _roundStartedAt[feedId][openId] = block.timestamp;
+            hasOpen = true;
+        }
+
+        // target current open round
+        uint80 roundId = openId;
+
+        // dedupe: one submission per operator per round
+        uint8 opIdx = _opIndex[feedId][msg.sender]; // 1-based
+        uint256 mask = (uint256(1) << (opIdx - 1));
+        uint256 bitmap = _submittedBitmap[feedId][roundId];
+        require(bitmap & mask == 0, "duplicate");
+        _submittedBitmap[feedId][roundId] = bitmap | mask;
+
+        // record answer
+        uint8 n = _answerCount[feedId][roundId];
+        _answers[feedId][roundId][n] = answer;
+        _answerCount[feedId][roundId] = n + 1;
+
+        emit SubmissionReceived(feedId, roundId, msg.sender, answer);
+
+        // finalize if reached max submissions
+        if (n + 1 == cfg.maxSubmissions) {
+            _finalizeRound(feedId, roundId);
+        }
+    }
+
+    function _finalizeRound(bytes32 feedId, uint80 roundId) internal {
+        uint8 n = _answerCount[feedId][roundId];
+        require(n > 0, "no answers");
+
+        int256[] memory buf = new int256[](n);
+        for (uint8 i = 0; i < n; i++) {
+            buf[i] = _answers[feedId][roundId][i];
+        }
+        _insertionSort(buf, n);
+
+        int256 median;
+        if (n % 2 == 1) {
+            median = buf[n / 2];
+        } else {
+            int256 a = buf[(n / 2) - 1];
+            int256 b = buf[n / 2];
+            median = _avgRoundHalfUp(a, b);
+        }
+
+        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        snap.roundId = roundId;
+        snap.answer = median;
+        snap.startedAt = _roundStartedAt[feedId][roundId];
+        snap.updatedAt = block.timestamp;
+        snap.answeredInRound = roundId;
+        snap.finalized = true;
+        snap.stale = false;
+        snap.submissionCount = n;
+
+        _latestRoundId[feedId] = roundId;
+
+        emit RoundFinalized(feedId, roundId, n);
+        emit PriceUpdated(feedId, median, snap.updatedAt);
+    }
+
+    // ============ Math ================
+
+    // average with round-half-up for non-negative values
+    function _avgRoundHalfUp(
+        int256 a,
+        int256 b
+    ) internal pure returns (int256) {
+        if (a >= 0 && b >= 0) {
+            return (a + b + 1) / 2;
+        }
+        // fallback for mixed/negative: Solidity rounds toward zero
+        return (a + b) / 2;
+    }
+
+    function _insertionSort(int256[] memory arr, uint256 len) internal pure {
+        for (uint256 i = 1; i < len; i++) {
+            int256 key = arr[i];
+            uint256 j = i;
+            while (j > 0 && arr[j - 1] > key) {
+                arr[j] = arr[j - 1];
+                unchecked {
+                    j--;
+                }
+            }
+            arr[j] = key;
+        }
+    }
+
     // ============ Internal ============
 
     function _validateConfig(
@@ -229,7 +374,7 @@ contract PriceLoomOracle is
     }
 
     // Bounds check: price within [minPrice, maxPrice]
-    function _withingBounds(
+    function _withinBounds(
         bytes32 feedId,
         int256 answer
     ) internal view returns (bool) {
