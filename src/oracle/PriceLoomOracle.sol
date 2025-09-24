@@ -29,7 +29,7 @@ contract PriceLoomOracle is
     // v0 EIP712 typehash (submission path will be added next)
     bytes32 public constant PRICE_SUBMISSION_TYPEHASH =
         keccak256(
-            "PriceSubmission(bytes32 feedId, uint80 roundId, int256 answer,uint256 validUntil)"
+            "PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)"
         );
 
     // Storage
@@ -200,6 +200,15 @@ contract PriceLoomOracle is
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
         if (snap.updatedAt == 0) return true;
         return (block.timestamp - snap.updatedAt) > maxStalenessSec;
+    }
+
+    // EIP712
+    function domainSeparatorV4() external view returns (bytes32) {
+        return _domainSeparatorV4();
+    }
+
+    function priceSubmissionTypehash() external pure returns (bytes32) {
+        return PRICE_SUBMISSION_TYPEHASH;
     }
 
     // ============ Internal ============
