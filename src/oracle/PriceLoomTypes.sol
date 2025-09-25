@@ -10,14 +10,14 @@ library OracleTypes {
         uint32 heartbeatSec;
         uint32 deviationBps; // e.g., 50 = 0.5%
         uint32 timeoutSec;
-        int256 minPrice; // inclusive, scaled by `decimals`
-        int256 maxPrice; // inclusive, scaled by `decimals`
+        uint256 minPrice; // inclusive, scaled by `decimals`
+        uint256 maxPrice; // inclusive, scaled by `decimals`
         string description; // e.g., "AR/byte"
     }
 
     struct RoundData {
         uint80 roundId;
-        int256 answer;
+        uint256 answer;
         uint256 startedAt;
         uint256 updatedAt;
         uint80 answeredInRound;
@@ -26,4 +26,3 @@ library OracleTypes {
         uint8 submissionCount;
     }
 }
-

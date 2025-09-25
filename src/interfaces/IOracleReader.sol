@@ -6,7 +6,7 @@ import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 interface IOracleReader {
     function getLatestPrice(
         bytes32 feedId
-    ) external view returns (int256 price, uint256 updatedAt);
+    ) external view returns (uint256 price, uint256 updatedAt);
 
     function latestRoundData(
         bytes32 feedId
@@ -15,7 +15,7 @@ interface IOracleReader {
         view
         returns (
             uint80 roundId,
-            int256 answer,
+            uint256 answer,
             uint256 startedAt,
             uint256 updatedAt,
             uint80 answeredInRound

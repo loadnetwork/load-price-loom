@@ -29,25 +29,70 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
         return 1;
     }
 
-    function getRoundData(uint80 /*_roundId*/)
+    function getRoundData(
+        uint80 /*_roundId*/
+    )
         external
         view
         override
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
     {
         // v0 core does not expose historical rounds; returning latest is acceptable for many adapters
         // but some consumers expect a revert for historical lookups. Uncomment to enforce strict behavior:
         // revert("HIST_DISABLED");
-        return oracle.latestRoundData(feedId);
+        (
+            uint80 _roundId,
+            uint256 _answer,
+            uint256 _startedAt,
+            uint256 _updatedAt,
+            uint80 _answeredInRound
+        ) = oracle.latestRoundData(feedId);
+
+        require(_answer <= uint256(type(int256).max), "overflow");
+
+        return (
+            _roundId,
+            int256(_answer),
+            _startedAt,
+            _updatedAt,
+            _answeredInRound
+        );
     }
 
     function latestRoundData()
         external
         view
         override
-        returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
     {
-        return oracle.latestRoundData(feedId);
+        (
+            uint80 _roundId,
+            uint256 _answer,
+            uint256 _startedAt,
+            uint256 _updatedAt,
+            uint80 _answeredInRound
+        ) = oracle.latestRoundData(feedId);
+
+        require(_answer <= uint256(type(int256).max), "overflow");
+
+        return (
+            _roundId,
+            int256(_answer),
+            _startedAt,
+            _updatedAt,
+            _answeredInRound
+        );
     }
 }
-
