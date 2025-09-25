@@ -7,13 +7,13 @@ library PriceSubmissionHash {
     struct PriceSubmission {
         bytes32 feedId;
         uint80 roundId;
-        uint256 answer;
+        int256 answer;
         uint256 validUntil;
     }
 
     bytes32 internal constant PRICE_SUBMISSION_TYPEHASH =
         keccak256(
-            "PriceSubmission(bytes32 feedId,uint256 roundId,uint256 answer,uint256 validUntil)"
+            "PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)"
         );
 
     function structHash(
@@ -25,8 +25,8 @@ library PriceSubmissionHash {
         // Fill the 32-byte slots in the same order as abi.encode(...)
         EHash.set(buf, 0, PRICE_SUBMISSION_TYPEHASH);
         EHash.set(buf, 1, sub.feedId); // already bytes32
-        EHash.set(buf, 2, bytes32(uint256(sub.roundId))); // smaller uintN => widen to uint256, then bytes32
-        EHash.set(buf, 3, bytes32(sub.answer));
+        EHash.set(buf, 2, bytes32(uint256(sub.roundId))); // widen to uint256, then bytes32
+        EHash.set(buf, 3, bytes32(uint256(sub.answer))); // two's complement representation
         EHash.set(buf, 4, bytes32(sub.validUntil));
 
         // keccak256(concat(buf))

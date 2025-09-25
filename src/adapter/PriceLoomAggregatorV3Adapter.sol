@@ -48,21 +48,13 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
         // revert("HIST_DISABLED");
         (
             uint80 _roundId,
-            uint256 _answer,
+            int256 _answer,
             uint256 _startedAt,
             uint256 _updatedAt,
             uint80 _answeredInRound
         ) = oracle.latestRoundData(feedId);
 
-        require(_answer <= uint256(type(int256).max), "overflow");
-
-        return (
-            _roundId,
-            int256(_answer),
-            _startedAt,
-            _updatedAt,
-            _answeredInRound
-        );
+        return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
     }
 
     function latestRoundData()
@@ -79,20 +71,12 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
     {
         (
             uint80 _roundId,
-            uint256 _answer,
+            int256 _answer,
             uint256 _startedAt,
             uint256 _updatedAt,
             uint80 _answeredInRound
         ) = oracle.latestRoundData(feedId);
 
-        require(_answer <= uint256(type(int256).max), "overflow");
-
-        return (
-            _roundId,
-            int256(_answer),
-            _startedAt,
-            _updatedAt,
-            _answeredInRound
-        );
+        return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
     }
 }

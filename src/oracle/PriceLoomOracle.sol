@@ -48,7 +48,7 @@ contract PriceLoomOracle is
 
     // Working state for open rounds (per feedId, per round)
     mapping(bytes32 => mapping(uint80 => uint256)) private _submittedBitmap; // dedupe operators (1 bit per index)
-    mapping(bytes32 => mapping(uint80 => mapping(uint8 => uint256)))
+    mapping(bytes32 => mapping(uint80 => mapping(uint8 => int256)))
         private _answers; // answers[feedId][roundId][i]
     mapping(bytes32 => mapping(uint80 => uint8)) private _answerCount; // count per open round
 
@@ -65,7 +65,7 @@ contract PriceLoomOracle is
         bytes32 indexed feedId,
         uint80 indexed roundId,
         address indexed operator,
-        uint256 answer
+        int256 answer
     );
     event RoundFinalized(
         bytes32 indexed feedId,
@@ -74,7 +74,7 @@ contract PriceLoomOracle is
     );
     event PriceUpdated(
         bytes32 indexed feedId,
-        uint256 answer,
+        int256 answer,
         uint256 updatedAt
     );
 
@@ -200,7 +200,7 @@ contract PriceLoomOracle is
 
     function getLatestPrice(
         bytes32 feedId
-    ) external view returns (uint256 price, uint256 updatedAt) {
+    ) external view returns (int256 price, uint256 updatedAt) {
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
         return (snap.answer, snap.updatedAt);
     }
@@ -212,7 +212,7 @@ contract PriceLoomOracle is
         view
         returns (
             uint80 roundId,
-            uint256 answer,
+            int256 answer,
             uint256 startedAt,
             uint256 updatedAt,
             uint80 answeredInRound
@@ -408,20 +408,20 @@ contract PriceLoomOracle is
         uint8 n = _answerCount[feedId][roundId];
         require(n > 0, "no answers");
 
-        uint256[] memory buf = new uint256[](n);
+        int256[] memory buf = new int256[](n);
         for (uint8 i = 0; i < n; i++) {
             buf[i] = _answers[feedId][roundId][i];
         }
 
         Sort.insertionSort(buf);
 
-        uint256 median;
+        int256 median;
         if (n % 2 == 1) {
             median = buf[n / 2];
         } else {
-            uint256 a = buf[(n / 2) - 1];
-            uint256 b = buf[n / 2];
-            median = Math.avgRoundHalfUp(a, b);
+            int256 a = buf[(n / 2) - 1];
+            int256 b = buf[n / 2];
+            median = Math.avgRoundHalfUpSigned(a, b);
         }
 
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
@@ -460,7 +460,7 @@ contract PriceLoomOracle is
     // Bounds check: price within [minPrice, maxPrice]
     function _withinBounds(
         bytes32 feedId,
-        uint256 answer
+        int256 answer
     ) internal view returns (bool) {
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
         return answer >= cfg.minPrice && answer <= cfg.maxPrice;
@@ -478,7 +478,7 @@ contract PriceLoomOracle is
     // Does proposed answer exceed deviation threshold vs last?
     function _exceedsDeviation(
         bytes32 feedId,
-        uint256 proposed
+        int256 proposed
     ) internal view returns (bool) {
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
         if (cfg.deviationBps == 0) return false;
@@ -486,9 +486,12 @@ contract PriceLoomOracle is
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
         if (snap.updatedAt == 0) return true; // no prior answer → allow first round
 
-        uint256 last = snap.answer;
-        uint256 denom = last > 0 ? last : 1; // avoid div by zero
-        uint256 diff = proposed > last ? proposed - last : last - proposed;
+        int256 last = snap.answer;
+        // absolute values
+        uint256 lastAbs = uint256(last >= 0 ? last : -last);
+        uint256 denom = lastAbs > 0 ? lastAbs : 1; // avoid div by zero
+        int256 ds = proposed - last;
+        uint256 diff = uint256(ds >= 0 ? ds : -ds);
 
         // diff / last >= deviationBps / 10_000
         return (diff * 10_000) / denom >= cfg.deviationBps;
@@ -497,7 +500,7 @@ contract PriceLoomOracle is
     // Gate to decide if a new round should start on next submission
     function _shouldStartNewRound(
         bytes32 feedId,
-        uint256 proposed
+        int256 proposed
     ) internal view returns (bool) {
         return _heartbeatElapsed(feedId) || _exceedsDeviation(feedId, proposed);
     }
