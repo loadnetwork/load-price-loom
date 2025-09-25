@@ -32,6 +32,13 @@ contract PriceLoomOracle is
             "PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)"
         );
 
+    struct PriceSubmission {
+        bytes32 feedId;
+        uint80 roundId;
+        int256 answer;
+        uint256 validUntil;
+    }
+
     modifier onlyFeedOperator(bytes32 feedId) {
         _onlyFeedOperator(feedId);
         _;
@@ -242,54 +249,171 @@ contract PriceLoomOracle is
         return PRICE_SUBMISSION_TYPEHASH;
     }
 
-    function submitPrice(
+    // public poke function to move stale round forward
+    function poke(bytes32 feedId) external whenNotPaused nonReentrant {
+        _handleTimeoutIfNeeded(feedId);
+    }
+
+    function submitSigned(
         bytes32 feedId,
-        int256 answer,
-        uint256 validUntil
-    ) external whenNotPaused nonReentrant onlyFeedOperator(feedId) {
+        PriceSubmission calldata sub,
+        bytes calldata sig
+    ) external whenNotPaused nonReentrant {
         // basic feed + bounds checks
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
         require(cfg.decimals != 0, "no feed");
-        require(block.timestamp <= validUntil, "expired");
-        require(_withinBounds(feedId, answer), "out of bounds");
+        require(sub.feedId == feedId, "feed mismatch");
+        require(block.timestamp <= sub.validUntil, "expired");
+        require(_withinBounds(feedId, sub.answer), "out of bounds");
 
-        // round selection
+        // recover signer and ensure it is an operator
+        bytes32 structHash = keccak256(
+            abi.encode(
+                PRICE_SUBMISSION_TYPEHASH,
+                sub.feedId,
+                sub.roundId,
+                sub.answer,
+                sub.validUntil
+            )
+        );
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address signer = ECDSA.recover(digest, sig);
+        uint8 opIdx = _opIndex[feedId][signer];
+        require(opIdx != 0, "not operator");
+
+        // Handle timed-out open round first (finalize at quorum or roll stale)
+        _handleTimeoutIfNeeded(feedId);
+
+        // determine open round id
         uint80 latest = _latestRoundId[feedId];
         uint80 openId = latest + 1;
         bool hasOpen = _roundStartedAt[feedId][openId] != 0;
 
-        // if no open round, only start when due (or on first ever update)
         if (!hasOpen) {
+            // no open round: must be due to start a new one
             OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
             bool firstEver = (snap.updatedAt == 0);
             require(
-                firstEver || _shouldStartNewRound(feedId, answer),
+                firstEver || _shouldStartNewRound(feedId, sub.answer),
                 "not due"
             );
+            // ensure signed round matches the one we are about to open
+            require(sub.roundId == openId, "wrong round");
             _roundStartedAt[feedId][openId] = block.timestamp;
-            hasOpen = true;
+        } else {
+            // open round exists: signature must target it
+            require(sub.roundId == openId, "wrong round");
         }
 
-        // target current open round
-        uint80 roundId = openId;
-
-        // dedupe: one submission per operator per round
-        uint8 opIdx = _opIndex[feedId][msg.sender]; // 1-based
+        // dedupe signer per round
         uint256 mask = (uint256(1) << (opIdx - 1));
-        uint256 bitmap = _submittedBitmap[feedId][roundId];
+        uint256 bitmap = _submittedBitmap[feedId][openId];
         require(bitmap & mask == 0, "duplicate");
-        _submittedBitmap[feedId][roundId] = bitmap | mask;
+        _submittedBitmap[feedId][openId] = bitmap | mask;
 
         // record answer
-        uint8 n = _answerCount[feedId][roundId];
-        _answers[feedId][roundId][n] = answer;
-        _answerCount[feedId][roundId] = n + 1;
+        uint8 n = _answerCount[feedId][openId];
+        _answers[feedId][openId][n] = sub.answer;
+        _answerCount[feedId][openId] = n + 1;
 
-        emit SubmissionReceived(feedId, roundId, msg.sender, answer);
+        emit SubmissionReceived(feedId, openId, signer, sub.answer);
 
         // finalize if reached max submissions
         if (n + 1 == cfg.maxSubmissions) {
-            _finalizeRound(feedId, roundId);
+            _finalizeRound(feedId, openId);
+        }
+    }
+
+    function submitSignedBatch(
+        bytes32 feedId,
+        PriceSubmission[] calldata subs,
+        bytes[] calldata sigs
+    ) external whenNotPaused nonReentrant {
+        require(subs.length == sigs.length, "length mismatch");
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        require(cfg.decimals != 0, "no feed");
+
+        // Handle timed-out open round first (finalize at quorum or roll stale)
+        _handleTimeoutIfNeeded(feedId);
+
+        // determine open round id
+        uint80 latest = _latestRoundId[feedId];
+        uint80 openId = latest + 1;
+        bool hasOpen = _roundStartedAt[feedId][openId] != 0;
+
+        if (!hasOpen) {
+            // allow opening only when due; gate based on first item
+            require(subs.length > 0, "empty batch");
+            PriceSubmission calldata first = subs[0];
+
+            OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+            bool firstEver = (snap.updatedAt == 0);
+            require(
+                firstEver || _shouldStartNewRound(feedId, first.answer),
+                "not due"
+            );
+
+            require(first.feedId == feedId, "feed mismatch");
+            require(first.roundId == openId, "wrong round");
+            require(block.timestamp <= first.validUntil, "expired");
+            require(_withinBounds(feedId, first.answer), "out of bounds");
+
+            _roundStartedAt[feedId][openId] = block.timestamp;
+        }
+
+        uint8 n = _answerCount[feedId][openId];
+        require(n < cfg.maxSubmissions, "round full");
+
+        // dedupe signers within this batch using operator index bits
+        uint256 batchMask = 0;
+
+        for (uint256 i = 0; i < subs.length; i++) {
+            PriceSubmission calldata sub = subs[i];
+            bytes calldata sig = sigs[i];
+
+            // per-item sanity
+            require(sub.feedId == feedId, "feed mismatch");
+            require(sub.roundId == openId, "wrong round");
+            require(block.timestamp <= sub.validUntil, "expired");
+            require(_withinBounds(feedId, sub.answer), "out of bounds");
+
+            // recover signer and map to operator index
+            bytes32 structHash = keccak256(
+                abi.encode(
+                    PRICE_SUBMISSION_TYPEHASH,
+                    sub.feedId,
+                    sub.roundId,
+                    sub.answer,
+                    sub.validUntil
+                )
+            );
+            bytes32 digest = _hashTypedDataV4(structHash);
+            address signer = ECDSA.recover(digest, sig);
+            uint8 opIdx = _opIndex[feedId][signer];
+            require(opIdx != 0, "not operator");
+
+            uint256 bit = (uint256(1) << (opIdx - 1));
+
+            // reject duplicates within batch and across on-chain bitmap
+            require(batchMask & bit == 0, "dup in batch");
+            batchMask |= bit;
+
+            uint256 onchain = _submittedBitmap[feedId][openId];
+            require(onchain & bit == 0, "duplicate");
+            _submittedBitmap[feedId][openId] = onchain | bit;
+
+            // record answer
+            n = _answerCount[feedId][openId]; // re-read
+            require(n < cfg.maxSubmissions, "round full");
+            _answers[feedId][openId][n] = sub.answer;
+            _answerCount[feedId][openId] = n + 1;
+
+            emit SubmissionReceived(feedId, openId, signer, sub.answer);
+
+            if (n + 1 == cfg.maxSubmissions) {
+                _finalizeRound(feedId, openId);
+                return;
+            }
         }
     }
 
@@ -421,5 +545,51 @@ contract PriceLoomOracle is
         int256 proposed
     ) internal view returns (bool) {
         return _heartbeatElapsed(feedId) || _exceedsDeviation(feedId, proposed);
+    }
+
+    // Timeout handling
+    function _handleTimeoutIfNeeded(
+        bytes32 feedId
+    ) internal returns (bool handled) {
+        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        if (cfg.timeoutSec == 0) return false;
+
+        uint80 openId = _latestRoundId[feedId] + 1;
+        uint256 startedAt = _roundStartedAt[feedId][openId];
+        if (startedAt == 0) return false; // no open round
+
+        if (block.timestamp - startedAt < cfg.timeoutSec) return false; // not timed out
+
+        uint8 n = _answerCount[feedId][openId];
+        if (n >= cfg.minSubmissions) {
+            _finalizeRound(feedId, openId);
+        } else {
+            _rollForwardStale(feedId, openId, n);
+        }
+        return true;
+    }
+
+    function _rollForwardStale(
+        bytes32 feedId,
+        uint80 roundId,
+        uint8 submissions
+    ) internal {
+        // Carry forward previous answer, mark stale, bump latestRoundId
+        OracleTypes.RoundData storage last = _latestSnapshot[feedId];
+
+        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        snap.roundId = roundId;
+        snap.answer = last.answer;
+        snap.startedAt = _roundStartedAt[feedId][roundId];
+        snap.updatedAt = block.timestamp;
+        snap.answeredInRound = last.answeredInRound; // unchanged
+        snap.finalized = true;
+        snap.stale = true;
+        snap.submissionCount = submissions;
+
+        _latestRoundId[feedId] = roundId;
+
+        emit RoundFinalized(feedId, roundId, submissions);
+        emit PriceUpdated(feedId, snap.answer, snap.updatedAt);
     }
 }
