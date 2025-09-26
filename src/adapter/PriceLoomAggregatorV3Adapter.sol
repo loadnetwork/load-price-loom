@@ -30,20 +30,20 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
     }
 
     function getRoundData(
-        uint80 _roundId
+        uint80 roundId
     )
         external
         view
         override
         returns (
-            uint80 roundId,
+            uint80 roundId_,
             int256 answer,
             uint256 startedAt,
             uint256 updatedAt,
             uint80 answeredInRound
         )
     {
-        try oracle.getRoundData(feedId, _roundId) returns (
+        try oracle.getRoundData(feedId, roundId) returns (
             uint80 r,
             int256 a,
             uint256 s,
@@ -75,7 +75,13 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
             uint256 _updatedAt,
             uint80 _answeredInRound
         ) {
-            return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
+            return (
+                _roundId,
+                _answer,
+                _startedAt,
+                _updatedAt,
+                _answeredInRound
+            );
         } catch {
             revert("No data present");
         }

@@ -6,7 +6,8 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {EIP712} from "@solady-utils/EIP712.sol";
+import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {EfficientHashLib as EHash} from "@solady-utils/EfficientHashLib.sol";
 
 import {OracleTypes} from "./PriceLoomTypes.sol";
 import {IOracleReader} from "src/interfaces/IOracleReader.sol";
@@ -14,7 +15,8 @@ import {IOracleAdmin} from "src/interfaces/IOracleAdmin.sol";
 
 import {Sort} from "src/libraries/Sort.sol";
 import {Math} from "src/libraries/Math.sol";
-import {PriceSubmissionHash} from "src/libraries/Hash.sol";
+import {Math as OZMath} from "@openzeppelin/contracts/utils/math/Math.sol";
+// EIP-712 struct hashing is implemented inline using OZ EIP712 utilities.
 
 contract PriceLoomOracle is
     AccessControl,
@@ -88,22 +90,11 @@ contract PriceLoomOracle is
         uint80 indexed roundId
     );
 
-    constructor(address admin) {
+    constructor(address admin) EIP712("Price Loom", "1") {
         require(admin != address(0), "admin=0");
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
         _grantRole(FEED_ADMIN_ROLE, admin);
-    }
-
-    // Provide domain name and version for EIP-712
-    function _domainNameAndVersion()
-        internal
-        pure
-        override
-        returns (string memory name, string memory version)
-    {
-        name = "Price Loom";
-        version = "1";
     }
 
     function version() external pure returns (uint256) {
@@ -309,13 +300,39 @@ contract PriceLoomOracle is
         }
     }
 
-    // EIP712
+    // EIP-712
+    struct PriceSubmission {
+        bytes32 feedId;
+        uint80 roundId;
+        int256 answer;
+        uint256 validUntil;
+    }
+
+    bytes32 public constant PRICE_SUBMISSION_TYPEHASH =
+        keccak256(
+            "PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)"
+        );
+
     function domainSeparator() external view returns (bytes32) {
-        return _domainSeparator();
+        return _domainSeparatorV4();
     }
 
     function priceSubmissionTypehash() external pure returns (bytes32) {
-        return PriceSubmissionHash.PRICE_SUBMISSION_TYPEHASH;
+        return PRICE_SUBMISSION_TYPEHASH;
+    }
+
+    // Optimized struct hash builder for EIP-712 PriceSubmission using Solady's EfficientHashLib.
+    // Equivalent to: keccak256(abi.encode(PRICE_SUBMISSION_TYPEHASH, feedId, roundId, answer, validUntil))
+    function _priceSubmissionStructHash(
+        PriceSubmission calldata sub
+    ) internal pure returns (bytes32) {
+        bytes32[] memory buf = EHash.malloc(5);
+        buf = EHash.set(buf, 0, PRICE_SUBMISSION_TYPEHASH);
+        buf = EHash.set(buf, 1, sub.feedId);
+        buf = EHash.set(buf, 2, bytes32(uint256(sub.roundId)));
+        buf = EHash.set(buf, 3, bytes32(uint256(sub.answer)));
+        buf = EHash.set(buf, 4, bytes32(sub.validUntil));
+        return EHash.hash(buf);
     }
 
     // public poke function to move stale round forward
@@ -325,7 +342,7 @@ contract PriceLoomOracle is
 
     function submitSigned(
         bytes32 feedId,
-        PriceSubmissionHash.PriceSubmission calldata sub,
+        PriceSubmission calldata sub,
         bytes calldata sig
     ) external whenNotPaused nonReentrant {
         // basic feed + bounds checks
@@ -336,8 +353,8 @@ contract PriceLoomOracle is
         require(_withinBounds(feedId, sub.answer), "out of bounds");
 
         // recover signer and ensure it is an operator
-        bytes32 structHash = PriceSubmissionHash.structHash(sub);
-        bytes32 digest = _hashTypedData(structHash);
+        bytes32 structHash = _priceSubmissionStructHash(sub);
+        bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, sig);
         uint8 opIdx = _opIndex[feedId][signer];
         require(opIdx != 0, "not operator");
@@ -390,7 +407,7 @@ contract PriceLoomOracle is
 
     function submitSignedBatch(
         bytes32 feedId,
-        PriceSubmissionHash.PriceSubmission[] calldata subs,
+        PriceSubmission[] calldata subs,
         bytes[] calldata sigs
     ) external whenNotPaused nonReentrant {
         require(subs.length == sigs.length, "length mismatch");
@@ -408,7 +425,7 @@ contract PriceLoomOracle is
         if (!hasOpen) {
             // allow opening only when due; gate based on first item
             require(subs.length > 0, "empty batch");
-            PriceSubmissionHash.PriceSubmission calldata first = subs[0];
+            PriceSubmission calldata first = subs[0];
 
             OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
             bool firstEver = (snap.updatedAt == 0);
@@ -433,7 +450,7 @@ contract PriceLoomOracle is
         uint256 batchMask = 0;
 
         for (uint256 i = 0; i < subs.length; i++) {
-            PriceSubmissionHash.PriceSubmission calldata sub = subs[i];
+            PriceSubmission calldata sub = subs[i];
             bytes calldata sig = sigs[i];
 
             // per-item sanity
@@ -443,8 +460,8 @@ contract PriceLoomOracle is
             require(_withinBounds(feedId, sub.answer), "out of bounds");
 
             // recover signer and map to operator index
-            bytes32 structHash = PriceSubmissionHash.structHash(sub);
-            bytes32 digest = _hashTypedData(structHash);
+            bytes32 structHash = _priceSubmissionStructHash(sub);
+            bytes32 digest = _hashTypedDataV4(structHash);
             address signer = ECDSA.recover(digest, sig);
             uint8 opIdx = _opIndex[feedId][signer];
             require(opIdx != 0, "not operator");
@@ -558,16 +575,16 @@ contract PriceLoomOracle is
 
     function _validateConfig(
         OracleTypes.FeedConfig calldata cfg,
-        uint256 operatorCount
+        uint256 opCount
     ) internal pure {
         require(cfg.decimals > 0 && cfg.decimals <= 18, "bad decimals");
         require(cfg.maxSubmissions >= cfg.minSubmissions, "bad min/max");
         require(cfg.minSubmissions >= 1, "min >=1");
         require(cfg.maxSubmissions <= MAX_OPERATORS, "max too large");
-        require(cfg.minSubmissions <= operatorCount, "quorum > operators");
-        if (operatorCount > 0) {
-            require(operatorCount <= MAX_OPERATORS, "too many ops");
-            require(cfg.maxSubmissions <= operatorCount, "max > operators");
+        require(cfg.minSubmissions <= opCount, "quorum > operators");
+        if (opCount > 0) {
+            require(opCount <= MAX_OPERATORS, "too many ops");
+            require(cfg.maxSubmissions <= opCount, "max > operators");
         }
         require(cfg.trim == 0, "trim unsupported v0");
         require(cfg.maxPrice >= cfg.minPrice, "bounds");
@@ -614,11 +631,8 @@ contract PriceLoomOracle is
         uint256 lastAbs = Math.absSignedToUint(last);
         uint256 diff = Math.absDiffSignedToUint(proposed, last);
 
-        // Avoid 256-bit overflow by comparing against a pre-divided threshold.
-        // Conservative (floor) rounding: if lastAbs < 10_000, threshold becomes 0 for small deviationBps,
-        // which slightly widens the "exceeds" condition but prevents overflow-based reverts.
-        uint256 threshold = (lastAbs / 10_000) * uint256(cfg.deviationBps);
-        return diff >= threshold;
+        // Exact and overflow-safe: (diff * 10_000) / lastAbs >= deviationBps
+        return OZMath.mulDiv(diff, 10_000, lastAbs) >= uint256(cfg.deviationBps);
     }
 
     // Gate to decide if a new round should start on next submission
@@ -642,7 +656,10 @@ contract PriceLoomOracle is
 
     /// @notice Returns whether a new round is due to start for the given proposed answer,
     /// according to heartbeat and deviation gating.
-    function dueToStart(bytes32 feedId, int256 proposed) external view returns (bool) {
+    function dueToStart(
+        bytes32 feedId,
+        int256 proposed
+    ) external view returns (bool) {
         return _shouldStartNewRound(feedId, proposed);
     }
 
@@ -698,14 +715,16 @@ contract PriceLoomOracle is
         uint8 submissions
     ) internal {
         // Carry forward previous answer, mark stale, bump latestRoundId
-        OracleTypes.RoundData storage last = _latestSnapshot[feedId];
-
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        // Cache fields before mutation to avoid double-aliasing reads/writes
+        int256 lastAnswer = snap.answer;
+        uint80 lastAnsweredInRound = snap.answeredInRound;
+
         snap.roundId = roundId;
-        snap.answer = last.answer;
+        snap.answer = lastAnswer;
         snap.startedAt = _roundStartedAt[feedId][roundId];
         snap.updatedAt = block.timestamp;
-        snap.answeredInRound = last.answeredInRound; // unchanged
+        snap.answeredInRound = lastAnsweredInRound; // unchanged
         snap.finalized = true;
         snap.stale = true;
         snap.submissionCount = submissions;

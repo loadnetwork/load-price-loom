@@ -4,6 +4,8 @@ pragma solidity ^0.8.30;
 import {PriceLoomAggregatorV3Adapter} from "./PriceLoomAggregatorV3Adapter.sol";
 import {IOracleReader} from "../interfaces/IOracleReader.sol";
 
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+
 contract PriceLoomAdapterFactory {
     IOracleReader public immutable oracle;
 
@@ -32,14 +34,12 @@ contract PriceLoomAdapterFactory {
     function computeAdapterAddress(
         bytes32 feedId
     ) external view returns (address predicted) {
-        bytes memory init = abi.encodePacked(
-            type(PriceLoomAggregatorV3Adapter).creationCode,
-            abi.encode(oracle, feedId)
+        bytes32 initCodeHash = keccak256(
+            abi.encodePacked(
+                type(PriceLoomAggregatorV3Adapter).creationCode,
+                abi.encode(oracle, feedId)
+            )
         );
-        bytes32 initCodeHash = keccak256(init);
-        bytes32 digest = keccak256(
-            abi.encodePacked(bytes1(0xff), address(this), feedId, initCodeHash)
-        );
-        predicted = address(uint160(uint256(digest)));
+        predicted = Create2.computeAddress(feedId, initCodeHash, address(this));
     }
 }
