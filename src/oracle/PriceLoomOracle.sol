@@ -30,21 +30,17 @@ contract PriceLoomOracle is
     bytes32 public constant FEED_ADMIN_ROLE = keccak256("FEED_ADMIN_ROLE");
 
     uint8 public constant MAX_OPERATORS = 31;
+    uint256 internal constant HISTORY_CAPACITY = 128;
+    uint256 internal constant HISTORY_MASK = HISTORY_CAPACITY - 1;
 
-    modifier onlyFeedOperator(bytes32 feedId) {
-        _onlyFeedOperator(feedId);
-        _;
-    }
-
-    function _onlyFeedOperator(bytes32 feedId) internal view {
-        require(_opIndex[feedId][msg.sender] != 0, "not operator");
-    }
+    // Note: Direct submissions require EIP-712 signatures; no direct-only operator function is exposed.
 
     // Storage
     mapping(bytes32 => OracleTypes.FeedConfig) private _feedConfig;
     mapping(bytes32 => mapping(address => uint8)) private _opIndex; // 1-based index; 0 = not an operator
     mapping(bytes32 => address[]) private _operators; // operators per feed
     mapping(bytes32 => OracleTypes.RoundData) private _latestSnapshot; // latest finalized per feed
+    mapping(bytes32 => mapping(uint256 => OracleTypes.RoundData)) private _history; // ring buffer via mask
 
     // Working state for open rounds (per feedId, per round)
     mapping(bytes32 => mapping(uint80 => uint256)) private _submittedBitmap; // dedupe operators (1 bit per index)
@@ -137,7 +133,10 @@ contract PriceLoomOracle is
         bytes32 feedId,
         OracleTypes.FeedConfig calldata cfg
     ) external onlyRole(FEED_ADMIN_ROLE) {
-        require(_feedConfig[feedId].decimals != 0, "No feed");
+        OracleTypes.FeedConfig storage prev = _feedConfig[feedId];
+        require(prev.decimals != 0, "No feed");
+        // Decimals are immutable per feed
+        require(cfg.decimals == prev.decimals, "decimals immutable");
         _validateConfig(cfg, _operators[feedId].length);
         _feedConfig[feedId] = cfg;
         emit FeedConfigUpdated(feedId, cfg);
@@ -219,6 +218,7 @@ contract PriceLoomOracle is
         )
     {
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+        require(snap.updatedAt != 0, "NO_DATA");
         return (
             snap.roundId,
             snap.answer,
@@ -226,6 +226,27 @@ contract PriceLoomOracle is
             snap.updatedAt,
             snap.answeredInRound
         );
+    }
+
+    function getRoundData(
+        bytes32 feedId,
+        uint80 roundId
+    )
+        external
+        view
+        returns (
+            uint80,
+            int256,
+            uint256,
+            uint256,
+            uint80
+        )
+    {
+        require(roundId > 0, "bad roundId");
+        uint256 idx = (uint256(roundId) - 1) & HISTORY_MASK;
+        OracleTypes.RoundData storage r = _history[feedId][idx];
+        require(r.roundId == roundId, "HIST_EVICTED");
+        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
     }
 
     function currentRoundId(bytes32 feedId) external view returns (uint80) {
@@ -438,6 +459,36 @@ contract PriceLoomOracle is
 
         emit RoundFinalized(feedId, roundId, n);
         emit PriceUpdated(feedId, median, snap.updatedAt);
+
+        // Store snapshot in ring buffer history
+        {
+            uint256 idx = (uint256(roundId) - 1) & HISTORY_MASK;
+            OracleTypes.RoundData storage slot = _history[feedId][idx];
+            slot.roundId = snap.roundId;
+            slot.answer = snap.answer;
+            slot.startedAt = snap.startedAt;
+            slot.updatedAt = snap.updatedAt;
+            slot.answeredInRound = snap.answeredInRound;
+            slot.finalized = snap.finalized;
+            slot.stale = snap.stale;
+            slot.submissionCount = snap.submissionCount;
+        }
+
+        // Clear working state for this round to prevent unbounded storage growth
+        _clearRound(feedId, roundId, n);
+    }
+
+    function _clearRound(
+        bytes32 feedId,
+        uint80 roundId,
+        uint8 submissionCount
+    ) internal {
+        delete _submittedBitmap[feedId][roundId];
+        for (uint8 i = 0; i < submissionCount; i++) {
+            delete _answers[feedId][roundId][i];
+        }
+        delete _answerCount[feedId][roundId];
+        delete _roundStartedAt[feedId][roundId];
     }
 
     // ============ Internal ============
@@ -452,9 +503,13 @@ contract PriceLoomOracle is
         require(cfg.maxSubmissions <= MAX_OPERATORS, "max too large");
         if (operatorCount > 0) {
             require(operatorCount <= MAX_OPERATORS, "too many ops");
+            require(cfg.minSubmissions <= operatorCount, "quorum > operators");
+            require(cfg.maxSubmissions <= operatorCount, "max > operators");
         }
         require(cfg.trim == 0, "trim unsupported v0");
         require(cfg.maxPrice >= cfg.minPrice, "bounds");
+        // Require at least one round gating mechanism
+        require(cfg.heartbeatSec > 0 || cfg.deviationBps > 0, "no gating");
     }
 
     // Bounds check: price within [minPrice, maxPrice]
@@ -523,6 +578,7 @@ contract PriceLoomOracle is
             _finalizeRound(feedId, openId);
         } else {
             _rollForwardStale(feedId, openId, n);
+            _clearRound(feedId, openId, n);
         }
         return true;
     }
@@ -549,5 +605,19 @@ contract PriceLoomOracle is
 
         emit RoundFinalized(feedId, roundId, submissions);
         emit PriceUpdated(feedId, snap.answer, snap.updatedAt);
+
+        // Store snapshot in ring buffer history
+        {
+            uint256 idx = (uint256(roundId) - 1) & HISTORY_MASK;
+            OracleTypes.RoundData storage slot = _history[feedId][idx];
+            slot.roundId = snap.roundId;
+            slot.answer = snap.answer;
+            slot.startedAt = snap.startedAt;
+            slot.updatedAt = snap.updatedAt;
+            slot.answeredInRound = snap.answeredInRound;
+            slot.finalized = snap.finalized;
+            slot.stale = snap.stale;
+            slot.submissionCount = snap.submissionCount;
+        }
     }
 }

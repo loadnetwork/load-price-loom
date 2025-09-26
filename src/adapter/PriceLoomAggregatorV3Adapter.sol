@@ -30,7 +30,7 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
     }
 
     function getRoundData(
-        uint80 /*_roundId*/
+        uint80 _roundId
     )
         external
         view
@@ -43,18 +43,7 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
             uint80 answeredInRound
         )
     {
-        // v0 core does not expose historical rounds; returning latest is acceptable for many adapters
-        // but some consumers expect a revert for historical lookups. Uncomment to enforce strict behavior:
-        // revert("HIST_DISABLED");
-        (
-            uint80 _roundId,
-            int256 _answer,
-            uint256 _startedAt,
-            uint256 _updatedAt,
-            uint80 _answeredInRound
-        ) = oracle.latestRoundData(feedId);
-
-        return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
+        return oracle.getRoundData(feedId, _roundId);
     }
 
     function latestRoundData()

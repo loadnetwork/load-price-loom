@@ -21,6 +21,20 @@ interface IOracleReader {
             uint80 answeredInRound
         );
 
+    function getRoundData(
+        bytes32 feedId,
+        uint80 roundId
+    )
+        external
+        view
+        returns (
+            uint80,
+            int256,
+            uint256,
+            uint256,
+            uint80
+        );
+
     function getConfig(
         bytes32 feedId
     ) external view returns (OracleTypes.FeedConfig memory);
