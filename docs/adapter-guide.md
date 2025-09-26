@@ -37,6 +37,7 @@
    - Solidity: `new PriceLoomAdapterFactory(IOracleReader(oracleAddr))`
 2) For each feedId call:
    - `factory.deployAdapter(feedId)` → emits `AdapterDeployed(feedId, adapter)`
+   - Note: The factory requires that the feed exists (created in the oracle). It reverts with `feed not found` if not.
 3) Store adapter addresses for your integrations.
 
 ### Deterministic Deployment (CREATE2)
@@ -95,6 +96,7 @@ const decimals = await feed.decimals();
 - Decimals/description reflect the feed's config in the core oracle.
 - Historical reads: core stores a 128‑round ring buffer. `getRoundData(roundId)` reverts if the round is evicted/outside the window.
 - Security: adapter is read-only; no special roles. Ensure the `oracle` address is correct at deploy time.
+- Adapter validity: The adapter constructor checks that the feed exists in the oracle. This prevents deploying unusable adapters for non-existent feeds.
 - Feed naming: prefer stable descriptors like `"AR/byte"` and version suffixes when needed, e.g., `"AR/byte:v1"`.
 
 ## Troubleshooting

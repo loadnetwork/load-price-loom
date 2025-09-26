@@ -107,6 +107,7 @@ contract PriceLoomOracle is
         OracleTypes.FeedConfig calldata cfg,
         address[] calldata operators
     ) external onlyRole(FEED_ADMIN_ROLE) {
+        require(feedId != bytes32(0), "zero feedId");
         require(_feedConfig[feedId].decimals == 0, "Feed exists");
         require(cfg.minSubmissions <= operators.length, "min > ops");
         _validateConfig(cfg, operators.length);
@@ -335,7 +336,9 @@ contract PriceLoomOracle is
         return EHash.hash(buf);
     }
 
-    // public poke function to move stale round forward
+    // Maintenance function to process a timed-out open round.
+    // Callable even while paused. For incident freeze, pause and avoid calling `poke`
+    // so state does not progress; for maintenance during pause, call `poke` as needed.
     function poke(bytes32 feedId) external nonReentrant {
         _handleTimeoutIfNeeded(feedId);
     }
@@ -588,6 +591,8 @@ contract PriceLoomOracle is
         }
         require(cfg.trim == 0, "trim unsupported v0");
         require(cfg.maxPrice >= cfg.minPrice, "bounds");
+        require(cfg.minPrice != type(int256).min, "minPrice too low");
+        require(cfg.maxPrice != type(int256).max, "maxPrice too high");
         require(bytes(cfg.description).length <= 100, "desc too long");
         // Require at least one round gating mechanism
         require(cfg.heartbeatSec > 0 || cfg.deviationBps > 0, "no gating");

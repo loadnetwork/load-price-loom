@@ -7,6 +7,10 @@ This guide covers safe, predictable maintenance operations for Price Loom Oracle
 - `poke(feedId)` is callable while paused. This lets you pause submissions, close any timed‑out open round, then apply admin changes.
 - First‑round timeout preserves NO_DATA: if the very first round times out below quorum, it does not publish a zero; it leaves the feed without data.
 
+## Operational Modes
+- Incident freeze: pause the contract and do not call `poke`. State will not progress while paused and un‑poked.
+- Maintenance during pause: if you want liveness (e.g., roll stale and keep adapters current), call `poke(feedId)` as needed while paused.
+
 ## Common Flows
 
 ### Change Operator Set (Add/Remove)
