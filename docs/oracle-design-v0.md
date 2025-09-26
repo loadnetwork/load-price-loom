@@ -92,6 +92,8 @@ function getConfig(bytes32 feedId) external view returns (FeedConfig memory);
 function isOperator(bytes32 feedId, address op) external view returns (bool);
 function currentRoundId(bytes32 feedId) external view returns (uint80);
 function isStale(bytes32 feedId, uint256 maxStalenessSec) external view returns (bool);
+function nextRoundId(bytes32 feedId) external view returns (uint80);
+function dueToStart(bytes32 feedId, int256 proposed) external view returns (bool);
 ```
 
 Adapter (optional, per feed) exposes standard Chainlink `AggregatorV3Interface` by delegating to `Oracle`.
@@ -145,8 +147,10 @@ Replay protection:
 - `validUntil` prevents acceptance of stale quotes.
 
 Operator flow:
-- Off-chain service fetches `currentRoundId(feedId)` and signs `{feedId, roundId, answer, validUntil}`.
-- Any relayer submits one or many signatures for that round.
+- Off-chain service determines the round to sign as follows:
+  - If a round is already open: `roundId = nextRoundId(feedId)` (exposed helper).
+  - If no round open: first check `dueToStart(feedId, answer)`; if true, sign `roundId = nextRoundId(feedId)` (which equals `latestFinalizedRoundId + 1`).
+- Sign `{feedId, roundId, answer, validUntil}` and relay.
 - Mixed `feedId` or `roundId` in a batch reverts.
 
 ## Round Lifecycle

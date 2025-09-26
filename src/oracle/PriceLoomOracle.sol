@@ -5,7 +5,7 @@ import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import {ECDSA} from "@solady-utils/ECDSA.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@solady-utils/EIP712.sol";
 
 import {OracleTypes} from "./PriceLoomTypes.sol";
@@ -26,7 +26,9 @@ contract PriceLoomOracle is
 {
     using ECDSA for bytes32;
 
+    /// @notice Role for pausing and unpausing submissions. Recommended: multisig.
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    /// @notice Role for managing feed configurations and operators. Recommended: multisig.
     bytes32 public constant FEED_ADMIN_ROLE = keccak256("FEED_ADMIN_ROLE");
 
     uint8 public constant MAX_OPERATORS = 31;
@@ -41,7 +43,8 @@ contract PriceLoomOracle is
     mapping(bytes32 => mapping(address => uint8)) private _opIndex; // 1-based index; 0 = not an operator
     mapping(bytes32 => address[]) private _operators; // operators per feed
     mapping(bytes32 => OracleTypes.RoundData) private _latestSnapshot; // latest finalized per feed
-    mapping(bytes32 => mapping(uint256 => OracleTypes.RoundData)) private _history; // ring buffer via mask
+    mapping(bytes32 => mapping(uint256 => OracleTypes.RoundData))
+        private _history; // ring buffer via mask
 
     // Working state for open rounds (per feedId, per round)
     mapping(bytes32 => mapping(uint80 => uint256)) private _submittedBitmap; // dedupe operators (1 bit per index)
@@ -79,10 +82,10 @@ contract PriceLoomOracle is
         int256 answer,
         uint256 updatedAt
     );
-    event StaleRoundRolled(
+
+    event StalePriceRolledForward(
         bytes32 indexed feedId,
-        uint80 indexed roundId,
-        int256 carriedAnswer
+        uint80 indexed roundId
     );
 
     constructor(address admin) {
@@ -103,6 +106,10 @@ contract PriceLoomOracle is
         version = "1";
     }
 
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+
     // ============ Admin ============
     function createFeed(
         bytes32 feedId,
@@ -110,6 +117,7 @@ contract PriceLoomOracle is
         address[] calldata operators
     ) external onlyRole(FEED_ADMIN_ROLE) {
         require(_feedConfig[feedId].decimals == 0, "Feed exists");
+        require(cfg.minSubmissions <= operators.length, "min > ops");
         _validateConfig(cfg, operators.length);
         _feedConfig[feedId] = cfg;
 
@@ -181,7 +189,6 @@ contract PriceLoomOracle is
         // enforce invariants post-removal to avoid bricking rounds
         uint256 newCount = ops.length - 1;
         require(newCount >= cfg.minSubmissions, "quorum>ops");
-        require(newCount >= cfg.maxSubmissions, "max>ops");
         uint256 idx = uint256(idx1 - 1);
         uint256 last = ops.length - 1;
         address lastOp = ops[last];
@@ -252,22 +259,18 @@ contract PriceLoomOracle is
     function getRoundData(
         bytes32 feedId,
         uint80 roundId
-    )
-        external
-        view
-        returns (
-            uint80,
-            int256,
-            uint256,
-            uint256,
-            uint80
-        )
-    {
+    ) external view returns (uint80, int256, uint256, uint256, uint80) {
         require(roundId > 0, "bad roundId");
         uint256 idx = (uint256(roundId) - 1) & HISTORY_MASK;
         OracleTypes.RoundData storage r = _history[feedId][idx];
         require(r.roundId == roundId, "HIST_EVICTED");
-        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
+        return (
+            r.roundId,
+            r.answer,
+            r.startedAt,
+            r.updatedAt,
+            r.answeredInRound
+        );
     }
 
     function currentRoundId(bytes32 feedId) external view returns (uint80) {
@@ -276,7 +279,9 @@ contract PriceLoomOracle is
         return _latestRoundId[feedId];
     }
 
-    function latestFinalizedRoundId(bytes32 feedId) external view returns (uint80) {
+    function latestFinalizedRoundId(
+        bytes32 feedId
+    ) external view returns (uint80) {
         return _latestRoundId[feedId];
     }
 
@@ -609,8 +614,11 @@ contract PriceLoomOracle is
         uint256 lastAbs = Math.absSignedToUint(last);
         uint256 diff = Math.absDiffSignedToUint(proposed, last);
 
-        // diff / last >= deviationBps / 10_000
-        return (diff * 10_000) / lastAbs >= cfg.deviationBps;
+        // Avoid 256-bit overflow by comparing against a pre-divided threshold.
+        // Conservative (floor) rounding: if lastAbs < 10_000, threshold becomes 0 for small deviationBps,
+        // which slightly widens the "exceeds" condition but prevents overflow-based reverts.
+        uint256 threshold = (lastAbs / 10_000) * uint256(cfg.deviationBps);
+        return diff >= threshold;
     }
 
     // Gate to decide if a new round should start on next submission
@@ -619,6 +627,23 @@ contract PriceLoomOracle is
         int256 proposed
     ) internal view returns (bool) {
         return _heartbeatElapsed(feedId) || _exceedsDeviation(feedId, proposed);
+    }
+
+    // ============ Public Helpers (off-chain ergonomics) ============
+
+    /// @notice Returns the roundId that operators should sign for the next submission.
+    /// If an open round exists, this returns that open round id. Otherwise, it returns latestFinalized + 1.
+    function nextRoundId(bytes32 feedId) external view returns (uint80) {
+        uint80 latest = _latestRoundId[feedId];
+        uint80 openId = latest + 1;
+        if (_roundStartedAt[feedId][openId] != 0) return openId;
+        return openId;
+    }
+
+    /// @notice Returns whether a new round is due to start for the given proposed answer,
+    /// according to heartbeat and deviation gating.
+    function dueToStart(bytes32 feedId, int256 proposed) external view returns (bool) {
+        return _shouldStartNewRound(feedId, proposed);
     }
 
     // Timeout handling
@@ -689,7 +714,7 @@ contract PriceLoomOracle is
 
         emit RoundFinalized(feedId, roundId, submissions);
         emit PriceUpdated(feedId, snap.answer, snap.updatedAt);
-        emit StaleRoundRolled(feedId, roundId, snap.answer);
+        emit StalePriceRolledForward(feedId, roundId);
 
         // Store snapshot in ring buffer history
         {

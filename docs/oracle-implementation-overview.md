@@ -158,6 +158,6 @@ Files of interest:
 
 ## No‑Data Semantics
 - If a feed has never finalized a round:
-  - `latestRoundData(feedId)` reverts with `"NO_DATA"` (Chainlink‑style semantics).
-  - `getLatestPrice(feedId)` also reverts with `"NO_DATA"`.
-  - `getRoundData(feedId, roundId)` reverts (`"bad roundId"` if `roundId == 0`, or `"HIST_EVICTED"` otherwise).
+  - `latestRoundData(feedId)` reverts with `"NO_DATA"` in the core oracle. The Chainlink adapter normalizes this to `"No data present"` for compatibility.
+  - `getLatestPrice(feedId)` also reverts with `"NO_DATA"` until first finalize.
+  - `getRoundData(feedId, roundId)` reverts (`"bad roundId"` if `roundId == 0`, or `"HIST_EVICTED"` otherwise). The adapter surfaces `"No data present"` in these cases.

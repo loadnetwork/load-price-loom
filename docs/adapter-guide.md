@@ -13,8 +13,8 @@
   - `bytes32 feedId` (fixed at deployment)
 - Exposes:
   - `decimals()` and `description()` via `oracle.getConfig(feedId)`
-  - `latestRoundData()` via `oracle.latestRoundData(feedId)`
-  - `getRoundData(roundId)`: delegates to `oracle.getRoundData(feedId, roundId)`; reverts if the round is outside the 128‑round history window
+- `latestRoundData()` via `oracle.latestRoundData(feedId)`; adapter normalizes missing data errors to `"No data present"` (Chainlink parity).
+- `getRoundData(roundId)`: delegates to `oracle.getRoundData(feedId, roundId)`; adapter normalizes evicted/missing rounds to `"No data present"`.
 - One adapter per feed. For N feeds, deploy N adapters (or use the factory).
 
 ## Files

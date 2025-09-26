@@ -4,6 +4,8 @@ pragma solidity ^0.8.30;
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 
 interface IOracleReader {
+    function version() external view returns (uint256);
+
     function getLatestPrice(
         bytes32 feedId
     ) external view returns (int256 price, uint256 updatedAt);
@@ -50,4 +52,9 @@ interface IOracleReader {
         bytes32 feedId,
         uint256 maxStalenessSec
     ) external view returns (bool);
+
+    // Helpers for off-chain operator ergonomics
+    function nextRoundId(bytes32 feedId) external view returns (uint80);
+
+    function dueToStart(bytes32 feedId, int256 proposed) external view returns (bool);
 }

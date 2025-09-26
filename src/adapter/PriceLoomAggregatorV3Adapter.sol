@@ -25,8 +25,8 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
         return cfg.description;
     }
 
-    function version() external pure override returns (uint256) {
-        return 1;
+    function version() external view override returns (uint256) {
+        return oracle.version();
     }
 
     function getRoundData(
@@ -43,7 +43,17 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
             uint80 answeredInRound
         )
     {
-        return oracle.getRoundData(feedId, _roundId);
+        try oracle.getRoundData(feedId, _roundId) returns (
+            uint80 r,
+            int256 a,
+            uint256 s,
+            uint256 u,
+            uint80 air
+        ) {
+            return (r, a, s, u, air);
+        } catch {
+            revert("No data present");
+        }
     }
 
     function latestRoundData()
@@ -58,14 +68,16 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
             uint80 answeredInRound
         )
     {
-        (
+        try oracle.latestRoundData(feedId) returns (
             uint80 _roundId,
             int256 _answer,
             uint256 _startedAt,
             uint256 _updatedAt,
             uint80 _answeredInRound
-        ) = oracle.latestRoundData(feedId);
-
-        return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
+        ) {
+            return (_roundId, _answer, _startedAt, _updatedAt, _answeredInRound);
+        } catch {
+            revert("No data present");
+        }
     }
 }
