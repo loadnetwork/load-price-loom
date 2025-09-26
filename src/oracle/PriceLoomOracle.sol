@@ -336,6 +336,15 @@ contract PriceLoomOracle is
         return EHash.hash(buf);
     }
 
+    /// @notice Returns the EIP-712 typed data hash for a PriceSubmission.
+    /// Useful for off-chain signing and test harnesses.
+    function getTypedDataHash(
+        PriceSubmission calldata sub
+    ) external view returns (bytes32) {
+        bytes32 structHash = _priceSubmissionStructHash(sub);
+        return _hashTypedDataV4(structHash);
+    }
+
     // Maintenance function to process a timed-out open round.
     // Callable even while paused. For incident freeze, pause and avoid calling `poke`
     // so state does not progress; for maintenance during pause, call `poke` as needed.
