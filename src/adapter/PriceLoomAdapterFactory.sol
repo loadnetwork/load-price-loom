@@ -17,5 +17,29 @@ contract PriceLoomAdapterFactory {
         adapter = address(new PriceLoomAggregatorV3Adapter(oracle, feedId));
         emit AdapterDeployed(feedId, adapter);
     }
-}
 
+    function deployAdapterDeterministic(
+        bytes32 feedId
+    ) external returns (address adapter) {
+        adapter = address(
+            new PriceLoomAggregatorV3Adapter{salt: feedId}(oracle, feedId)
+        );
+        emit AdapterDeployed(feedId, adapter);
+    }
+
+    /// @notice Predict the deterministic adapter address for a feedId using CREATE2.
+    /// @dev Uses salt = feedId and constructor args (oracle, feedId).
+    function computeAdapterAddress(
+        bytes32 feedId
+    ) external view returns (address predicted) {
+        bytes memory init = abi.encodePacked(
+            type(PriceLoomAggregatorV3Adapter).creationCode,
+            abi.encode(oracle, feedId)
+        );
+        bytes32 initCodeHash = keccak256(init);
+        bytes32 digest = keccak256(
+            abi.encodePacked(bytes1(0xff), address(this), feedId, initCodeHash)
+        );
+        predicted = address(uint160(uint256(digest)));
+    }
+}
