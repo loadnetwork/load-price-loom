@@ -3,10 +3,7 @@ pragma solidity ^0.8.30;
 
 library Math {
     // average with round-half-up
-    function avgRoundHalfUp(
-        uint256 a,
-        uint256 b
-    ) internal pure returns (uint256) {
+    function avgRoundHalfUp(uint256 a, uint256 b) internal pure returns (uint256) {
         // safe from overflow; equivalent to (a + b + 1) / 2
         return (a >> 1) + (b >> 1) + (((a & 1) + (b & 1) + 1) >> 1);
     }
@@ -22,10 +19,7 @@ library Math {
     }
 
     // Absolute difference between two signed ints, as uint; overflow-safe
-    function absDiffSignedToUint(
-        int256 a,
-        int256 b
-    ) internal pure returns (uint256) {
+    function absDiffSignedToUint(int256 a, int256 b) internal pure returns (uint256) {
         unchecked {
             // Bias both to unsigned in a monotonic way by flipping the sign bit
             uint256 ua = uint256(a) ^ (uint256(1) << 255);
@@ -38,10 +32,7 @@ library Math {
     // - If both non-negative: round half up as unsigned
     // - If both negative: apply half-up on magnitudes, then negate
     // - If mixed signs: use trunc toward zero (x + (y - x)/2)
-    function avgRoundHalfUpSigned(
-        int256 a,
-        int256 b
-    ) internal pure returns (int256) {
+    function avgRoundHalfUpSigned(int256 a, int256 b) internal pure returns (int256) {
         if (a >= 0 && b >= 0) {
             uint256 au = uint256(a);
             uint256 bu = uint256(b);

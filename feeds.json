@@ -1,0 +1,22 @@
+{
+  "feeds": [
+    {
+      "id": "AR/byte",
+      "decimals": 8,
+      "minSubmissions": 2,
+      "maxSubmissions": 3,
+      "heartbeatSec": 3600,
+      "deviationBps": 50,
+      "timeoutSec": 900,
+      "minPrice": "0",
+      "maxPrice": "10000000000000000000000",
+      "description": "AR/byte",
+      "operators": [
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000003"
+      ]
+    }
+  ]
+}
+

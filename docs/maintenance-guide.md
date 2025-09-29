@@ -5,7 +5,7 @@ This guide covers safe, predictable maintenance operations for Price Loom Oracle
 ## Principles
 - Admin mutations (add/remove operators, setFeedConfig) are prevented only while a round is open for that feed. This avoids bitmap/index drift and mid‑round DoS.
 - `poke(feedId)` is callable while paused. This lets you pause submissions, close any timed‑out open round, then apply admin changes.
-- First‑round timeout preserves NO_DATA: if the very first round times out below quorum, it does not publish a zero; it leaves the feed without data.
+- First‑round timeout preserves NoData(): if the very first round times out below quorum, it does not publish a zero; it leaves the feed without data.
 
 ## Operational Modes
 - Incident freeze: pause the contract and do not call `poke`. State will not progress while paused and un‑poked.
@@ -111,8 +111,8 @@ echo $CODE # non-empty if deployed
 ```
 
 ## Read Semantics & Helpers
-- `getLatestPrice(feedId)` and `latestRoundData(feedId)` revert with `NO_DATA` until the first finalize.
-- `getRoundData(feedId, roundId)` reverts with `HIST_EVICTED` if outside the 128‑round history window.
+- `getLatestPrice(feedId)` and `latestRoundData(feedId)` revert with `NoData()` until the first finalize.
+- `getRoundData(feedId, roundId)` reverts with `HistoryEvicted()` if outside the 128‑round history window.
 - `latestFinalizedRoundId(feedId)` returns the last finalized round id.
 - `RoundStarted`, `RoundFinalized`, and `PriceUpdated` events describe lifecycle transitions.
 

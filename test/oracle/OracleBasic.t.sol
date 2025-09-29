@@ -57,4 +57,3 @@ contract OracleBasicTest is Test {
         assertTrue(oracle.isOperator(FEED, ops[2]));
     }
 }
-

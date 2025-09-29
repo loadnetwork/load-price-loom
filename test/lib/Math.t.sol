@@ -44,4 +44,3 @@ contract MathLibTest is Test {
         assertEq(Math.absDiffSignedToUint(10, -7), 17);
     }
 }
-

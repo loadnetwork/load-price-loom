@@ -4,16 +4,9 @@ pragma solidity ^0.8.30;
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 
 interface IOracleAdmin {
-    function createFeed(
-        bytes32 feedId,
-        OracleTypes.FeedConfig calldata cfg,
-        address[] calldata operators
-    ) external;
+    function createFeed(bytes32 feedId, OracleTypes.FeedConfig calldata cfg, address[] calldata operators) external;
 
-    function setFeedConfig(
-        bytes32 feedId,
-        OracleTypes.FeedConfig calldata cfg
-    ) external;
+    function setFeedConfig(bytes32 feedId, OracleTypes.FeedConfig calldata cfg) external;
 
     function addOperator(bytes32 feedId, address op) external;
 

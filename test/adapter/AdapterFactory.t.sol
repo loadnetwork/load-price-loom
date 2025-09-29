@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
-import {PriceLoomAdapterFactory} from "src/adapter/PriceLoomAdapterFactory.sol";
+import {PriceLoomAdapterFactory, FeedNotFound} from "src/adapter/PriceLoomAdapterFactory.sol";
 import {PriceLoomAggregatorV3Adapter} from "src/adapter/PriceLoomAggregatorV3Adapter.sol";
 
 contract AdapterFactoryTest is Test {
@@ -42,10 +42,10 @@ contract AdapterFactoryTest is Test {
     }
 
     function test_factoryRejectsUnknownFeed() public {
-        vm.expectRevert(bytes("feed not found"));
+        vm.expectRevert(FeedNotFound.selector);
         factory.deployAdapter(FEED);
 
-        vm.expectRevert(bytes("feed not found"));
+        vm.expectRevert(FeedNotFound.selector);
         factory.deployAdapterDeterministic(FEED);
     }
 
@@ -72,4 +72,3 @@ contract AdapterFactoryTest is Test {
         assertEq(deployed, predicted, "CREATE2 address mismatch");
     }
 }
-

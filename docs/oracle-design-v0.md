@@ -2,7 +2,7 @@
 
 ## Overview
 - Push-based, multi-feed price oracle with on-chain aggregation.
-- Operators submit prices either directly (tx) or via EIP-712 signatures; contract medianizes per round.
+- Operators submit prices via EIP-712 signatures; contract medianizes per round.
 - Freshness via heartbeat and deviation triggers; liveness via timeout and a public poke.
 - Public reads, plus Chainlink-compatible views via a per-feed adapter.
 
@@ -15,14 +15,14 @@
 - Finalization: when `maxSubmissions` reached or `timeoutSec` elapsed with `submissionCount ≥ minSubmissions`.
 
 ## Contracts
-- `Oracle` (upgradeable; OpenZeppelin AccessControl, Pausable, EIP712, ReentrancyGuard).
+- `Oracle` (non-upgradeable v0; OpenZeppelin AccessControl, Pausable, EIP712, ReentrancyGuard).
 - `FeedAdapter` (optional, per feed) implements Chainlink `AggregatorV3Interface` and delegates reads to `Oracle`.
 
 ## Roles
-- `DEFAULT_ADMIN_ROLE`: multisig (upgrade, config, operator admin).
-- `PAUSER_ROLE`: multisig (pause/unpause writes).
-- `FEED_ADMIN_ROLE`: multisig (per-feed config/ops).
-- `OPERATOR_ROLE[feedId]`: per-feed operator allowlist (internal mapping from address to index).
+- `DEFAULT_ADMIN_ROLE`: centralized admin (config, operator admin).
+- `PAUSER_ROLE`: admin (pause/unpause writes).
+- `FEED_ADMIN_ROLE`: admin (per-feed config/ops).
+- Per-feed operator allowlist (internal mapping from address to index).
 
 ## Data Model
 ```solidity
@@ -96,6 +96,7 @@ function dueToStart(bytes32 feedId, int256 proposed) external view returns (bool
 ```
 
 Adapter (optional, per feed) exposes standard Chainlink `AggregatorV3Interface` by delegating to `Oracle`.
+Missing data is normalized to "No data present" for compatibility.
 
 ## Write APIs
 - EIP-712 signatures (v0, permissionless submit; operator signs, anyone submits):
@@ -235,7 +236,7 @@ event Unpaused(address account);
   - Random answer sets within bounds → deterministic median.
   - Deviation math across small/large magnitudes.
 - Adapter tests: `FeedAdapter` mirrors `latestRoundData` and `decimals/description/version`.
-- History tests: after >128 rounds, oldest rounds revert via `HIST_EVICTED`; recent rounds read correctly.
+- History tests: after >128 rounds, oldest rounds revert via `HistoryEvicted()`; recent rounds read correctly.
 
 ## Migration / Integration
 - Consumers read via `getLatestPrice(feedId)` or `latestRoundData(feedId)`.

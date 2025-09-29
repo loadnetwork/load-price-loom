@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {Script, console2} from "forge-std/Script.sol";
+import {Script} from "forge-std/Script.sol";
+import "forge-std/console2.sol";
 import {IOracleReader} from "src/interfaces/IOracleReader.sol";
 import {PriceLoomAggregatorV3Adapter} from "src/adapter/PriceLoomAggregatorV3Adapter.sol";
 
@@ -22,7 +23,7 @@ contract DeployArByteAdapter is Script {
         PriceLoomAggregatorV3Adapter adapter = new PriceLoomAggregatorV3Adapter(oracle, FEED_ID);
         vm.stopBroadcast();
 
-        console2.log("Adapter deployed for AR/byte feedId:", address(adapter));
+        console2.log("Adapter deployed for AR/byte feedId:");
+        console2.logAddress(address(adapter));
     }
 }
-

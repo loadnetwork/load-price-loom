@@ -7,7 +7,7 @@ This document explains how the current oracle scaffolding works: what each funct
 - The contract opens a new round when heartbeat/deviation rules say it’s due.
 - Each operator may submit once per round; answers are deduped via a bitmap.
 - When finalization criteria hit, the round median is computed and published.
-- Readers fetch `getLatestPrice` or `latestRoundData`. `getLatestPrice` reverts with `"NO_DATA"` until the first finalize.
+- Readers fetch `getLatestPrice` or `latestRoundData`. `getLatestPrice` reverts with `NoData()` until the first finalize.
 
 ## Core Types
 - FeedConfig (per‑feed parameters)
@@ -45,17 +45,17 @@ This document explains how the current oracle scaffolding works: what each funct
 - Rationale: provide recent historical reads without unbounded storage.
 
 ## Roles & Access
-- `DEFAULT_ADMIN_ROLE`: full admin (multisig recommended).
+- `DEFAULT_ADMIN_ROLE`: full admin (centralized by design).
 - `FEED_ADMIN_ROLE`: manage feeds/config/operators.
 - `PAUSER_ROLE`: pause/unpause submissions (reads continue).
-- Submission access: only whitelisted operators per feed (`onlyFeedOperator(feedId)`).
+- Submission access: only whitelisted operators per feed.
 
 ## Read Interfaces (IOracleReader)
 - `getLatestPrice(feedId) -> (answer, updatedAt)`: simple consumption.
 - `latestRoundData(feedId) -> (roundId, answer, startedAt, updatedAt, answeredInRound)`: Chainlink‑style tuple.
 - `getRoundData(feedId, roundId) -> (roundId, answer, startedAt, updatedAt, answeredInRound)`:
-  - Reverts with `"bad roundId"` if `roundId == 0`.
-  - Reverts with `"HIST_EVICTED"` if the requested round is older than the 128‑round window or not present.
+  - Reverts with `BadRoundId()` if `roundId == 0`.
+  - Reverts with `HistoryEvicted()` if the requested round is older than the 128‑round window or not present.
 - `getConfig(feedId) -> FeedConfig`: current parameters.
 - `isOperator(feedId, op) -> bool`: membership check.
 - `currentRoundId(feedId) -> uint80`: returns open round id if started, else last finalized.
@@ -158,6 +158,6 @@ Files of interest:
 
 ## No‑Data Semantics
 - If a feed has never finalized a round:
-  - `latestRoundData(feedId)` reverts with `"NO_DATA"` in the core oracle. The Chainlink adapter normalizes this to `"No data present"` for compatibility.
-  - `getLatestPrice(feedId)` also reverts with `"NO_DATA"` until first finalize.
-  - `getRoundData(feedId, roundId)` reverts (`"bad roundId"` if `roundId == 0`, or `"HIST_EVICTED"` otherwise). The adapter surfaces `"No data present"` in these cases.
+  - `latestRoundData(feedId)` reverts with `NoData()` in the core oracle. The Chainlink adapter normalizes this to `"No data present"` for compatibility.
+  - `getLatestPrice(feedId)` also reverts with `NoData()` until first finalize.
+  - `getRoundData(feedId, roundId)` reverts (`BadRoundId()` if `roundId == 0`, or `HistoryEvicted()` otherwise). The adapter surfaces `"No data present"` in these cases.

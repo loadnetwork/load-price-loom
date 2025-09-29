@@ -1,145 +1,68 @@
-# Price Loom Operator Guide
+# Operator Guide
 
-This guide provides off-chain operators with the necessary steps and code examples to sign and submit price data to the `PriceLoomOracle` contract.
+Operators sign EIP‑712 price submissions off‑chain and relay them on‑chain (by anyone). This guide covers responsibilities, code snippets, and best practices.
 
-## Overview
+## Responsibilities
+- Secure key management (HSM or well‑managed hot wallet).
+- Data quality (multiple upstream sources, sanity checks, outlier filtering).
+- Timeliness (submit per heartbeat, or when deviation threshold is crossed).
 
-As an operator, your primary role is to fetch price data from reliable sources, sign this data using your private key, and ensure it is submitted to the oracle. Submissions are made via EIP-712 typed data signatures, which means another party (a "relayer") can submit your signed message on your behalf, saving you from paying gas for every submission.
+## EIP‑712 Typed Data
+Type: `PriceSubmission(bytes32 feedId,uint80 roundId,int256 answer,uint256 validUntil)`
+Domain: `{ name: "Price Loom", version: "1", chainId, verifyingContract }`
 
-## Submission Workflow
-
-1.  **Fetch Price Data:** Get the current price for the feed you are responsible for (e.g., AR/byte).
-2.  **Determine Round ID:** Query the oracle contract to find the correct `roundId` to sign for.
-3.  **Construct Submission:** Create the `PriceSubmission` data structure.
-4.  **Sign Typed Data:** Use your operator private key to sign the EIP-712 `PriceSubmission` data.
-5.  **Submit Signature:** Call the `submitSigned` function on the `PriceLoomOracle` contract, passing in the submission data and your signature.
-
-## TypeScript Example (using Ethers.js v5)
-
-This example demonstrates the complete process of signing and submitting a price.
-
-### 1. Setup
-
-First, ensure you have `ethers` installed in your project:
-
-```bash
-npm install ethers
-```
-
-### 2. Code Example
-
-Save the following code as `submitPrice.ts`. This script reads your operator private key from an environment variable, constructs the submission, signs it, and sends it to the contract.
-
-```typescript
+## Signing & Submitting (ethers v6)
+```ts
 import { ethers } from "ethers";
 
-// ABI fragment for the PriceLoomOracle contract
-const oracleAbi = [
-    "function submitSigned(bytes32 feedId, tuple(bytes32 feedId, uint80 roundId, int256 answer, uint256 validUntil) sub, bytes sig)",
-    "function nextRoundId(bytes32 feedId) external view returns (uint80)",
-    "function priceSubmissionTypehash() external pure returns (bytes32)",
-    "function domainSeparator() external view returns (bytes32)"
-];
+const oracle = new ethers.Contract(ORACLE_ADDRESS, [
+  "function nextRoundId(bytes32) view returns (uint80)",
+  "function dueToStart(bytes32,int256) view returns (bool)",
+  "function getConfig(bytes32) view returns (tuple(uint8,uint8,uint8,uint8,uint32,uint32,uint32,int256,int256,string))",
+  "function submitSigned(bytes32,(bytes32,uint80,int256,uint256),bytes)"
+], provider);
 
-// --- Configuration ---
-const ORACLE_ADDRESS = "0xYourOracleAddressHere"; // TODO: Replace with your oracle's address
-const RPC_URL = "https://your.rpc.url"; // TODO: Replace with your RPC endpoint
-const OPERATOR_PRIVATE_KEY = process.env.OPERATOR_PRIVATE_KEY;
+const feedId = FEED_ID; // keccak256(abi.encodePacked("AR/byte"))
+const proposed = 101n * 10n ** 8n; // example price at decimals=8
 
-const FEED_NAME = "AR/byte";
-const PRICE_TO_SUBMIT = ethers.utils.parseUnits("0.000000123", 18); // Example: 123 winston/byte, scaled to 18 decimals
-// --- End Configuration ---
+let round = await oracle.nextRoundId(feedId);
+const allowOpen = await oracle.dueToStart(feedId, proposed);
+// If no open round yet and not due to start, wait until heartbeat or sufficient deviation
 
-async function main() {
-    if (!OPERATOR_PRIVATE_KEY) {
-        throw new Error("OPERATOR_PRIVATE_KEY environment variable not set!");
-    }
+const submission = {
+  feedId,
+  roundId: round,
+  answer: proposed,
+  validUntil: BigInt(Math.floor(Date.now()/1000) + 60),
+};
 
-    // 1. Connect to the blockchain
-    const provider = new ethers.providers.JsonRpcProvider(RPC_URL);
-    const signer = new ethers.Wallet(OPERATOR_PRIVATE_KEY, provider);
-    const oracle = new ethers.Contract(ORACLE_ADDRESS, oracleAbi, signer);
+const domain = {
+  name: "Price Loom",
+  version: "1",
+  chainId: (await provider.getNetwork()).chainId,
+  verifyingContract: ORACLE_ADDRESS,
+};
 
-    console.log(`Using operator address: ${signer.address}`);
+const types = {
+  PriceSubmission: [
+    { name: "feedId", type: "bytes32" },
+    { name: "roundId", type: "uint80" },
+    { name: "answer", type: "int256" },
+    { name: "validUntil", type: "uint256" },
+  ],
+};
 
-    // 2. Define EIP-712 domain and types
-    const domain = {
-        name: "Price Loom",
-        version: "1",
-        chainId: (await provider.getNetwork()).chainId,
-        verifyingContract: ORACLE_ADDRESS
-    };
-
-    const types = {
-        PriceSubmission: [
-            { name: "feedId", type: "bytes32" },
-            { name: "roundId", type: "uint80" },
-            { name: "answer", type: "int256" },
-            { name: "validUntil", type: "uint256" }
-        ]
-    };
-
-    // 3. Construct the submission data
-    const feedId = ethers.utils.id(FEED_NAME); // keccak256("AR/byte")
-    const roundId = await oracle.nextRoundId(feedId);
-    const validUntil = Math.floor(Date.now() / 1000) + 300; // Signature is valid for 5 minutes
-
-    const submission = {
-        feedId: feedId,
-        roundId: roundId,
-        answer: PRICE_TO_SUBMIT,
-        validUntil: validUntil
-    };
-
-    console.log("\nSigning submission:");
-    console.log(submission);
-
-    // 4. Sign the typed data
-    const signature = await signer._signTypedData(domain, types, submission);
-
-    console.log(`\nSignature: ${signature}`);
-
-    // 5. Submit the signed price to the oracle
-    try {
-        console.log("\nSubmitting transaction...");
-        const tx = await oracle.submitSigned(feedId, submission, signature);
-        console.log(`Transaction sent! Hash: ${tx.hash}`);
-
-        const receipt = await tx.wait();
-        console.log(`Transaction mined! Gas used: ${receipt.gasUsed.toString()}`);
-
-    } catch (error) {
-        console.error("\nTransaction failed!");
-        // The error object often contains useful details
-        if (error.reason) {
-            console.error(`Reason: ${error.reason}`);
-        }
-        // console.error(error);
-    }
-}
-
-main().catch((error) => {
-    console.error(error);
-    process.exit(1);
-});
+const sig = await signer.signTypedData(domain, types, submission);
+const tx = await oracle.submitSigned(feedId, submission, sig);
+await tx.wait();
 ```
 
-### 3. How to Run
-
-1.  **Set Environment Variable:**
-
-    ```bash
-    export OPERATOR_PRIVATE_KEY="0xYourPrivateKeyHere"
-    ```
-
-2.  **Run the Script:**
-
-    You will need `ts-node` to run the TypeScript file directly.
-
-    ```bash
-    npm install -g ts-node
-    ts-node submitPrice.ts
-    ```
+## Best Practices
+- Always compute `roundId` via `nextRoundId(feedId)` and validate with `dueToStart` when opening a new round.
+- Keep `validUntil` short (e.g., 60–120s).
+- Keep your time source synced (NTP).
+- Monitor `isStale(feedId, maxDelay)` and alerts on missed heartbeats/deviations.
+- Rotate operators via admin flow as needed.
 
 ## Common Revert Reasons
 
@@ -148,3 +71,34 @@ main().catch((error) => {
 -   `DuplicateSubmission()`: Your operator address has already submitted a price for this round.
 -   `NotOperator()`: The signing key does not correspond to a registered operator for this feed.
 -   `OutOfBounds()`: The price you submitted is outside the `minPrice`/`maxPrice` configured for the feed.
+
+---
+
+## Production Considerations
+
+While the script above is a functional example, a production-grade operator requires additional robustness and security.
+
+### 1. Secure Key Management
+
+Storing a plaintext private key in an environment variable is **not secure** for production. Use a dedicated key management solution:
+-   **Hardware Security Module (HSM):** For the highest level of security.
+-   **Managed KMS:** Cloud provider services like AWS KMS, Google Cloud KMS, or Azure Key Vault.
+-   **Self-Hosted Vault:** Tools like HashiCorp Vault.
+
+Your application should request a signature from these systems without ever accessing the raw private key.
+
+### 2. Data Source Redundancy
+
+Do not rely on a single API for price data. Your service should:
+-   Fetch data from multiple, independent, and highly-reputable sources (e.g., Binance, Coinbase, Kraken, CoinGecko).
+-   Implement logic to validate and aggregate these prices, for example, by taking the median or a volume-weighted average.
+-   Include sanity checks to discard outlier sources that deviate significantly from the aggregate.
+
+### 3. Monitoring and Alerting
+
+Your operator node is critical infrastructure. You must have monitoring in place to alert you to problems:
+-   **Submission Success:** Monitor your transactions to ensure they are being successfully mined. Alert on consecutive failures.
+-   **Price Deviation:** Alert if your sourced price deviates significantly from the current on-chain median. This could indicate an issue with your sources or a market event.
+-   **Gas Tank:** Monitor the balance of the address used for submitting transactions and alert when it runs low.
+-   **System Health:** Monitor the health (CPU, memory, etc.) of the server running your operator service.
+

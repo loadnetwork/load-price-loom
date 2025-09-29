@@ -14,9 +14,9 @@ Updated: 2025-09-26
 ## Decisions
 - V3‑only compatibility (no Aggregator v2 interface).
 - EIP‑712 domain: name "Price Loom", version "1".
-- History capped at 128 rounds; older rounds revert `HIST_EVICTED`.
-- `latestRoundData` reverts `NO_DATA` until first finalize.
- - `getLatestPrice` reverts `NO_DATA` until first finalize.
+- History capped at 128 rounds; older rounds revert `HistoryEvicted()`.
+- `latestRoundData` reverts `NoData()` until first finalize.
+- `getLatestPrice` reverts `NoData()` until first finalize.
 
 ## Completed
 - Align types to Chainlink: `int256` answers; `uint80` round ids.
@@ -33,10 +33,10 @@ Updated: 2025-09-26
 
 ## Next
 - Tests (Foundry):
-  - First update flow: NO_DATA → finalize → success.
+  - First update flow: NoData() → finalize → success.
   - Medianization for signed values (odd/even; negative ranges).
   - Timeout finalize vs stale roll; batch dedupe.
-  - History window: >128 rounds causes earliest rounds to revert `HIST_EVICTED`.
+  - History window: >128 rounds causes earliest rounds to revert `HistoryEvicted()`.
   - Adapter mirrors oracle results.
 - Scripts:
   - Feed creation/config and operator admin scripts.
