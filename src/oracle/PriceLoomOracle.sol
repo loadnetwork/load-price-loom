@@ -16,7 +16,49 @@ import {IOracleAdmin} from "src/interfaces/IOracleAdmin.sol";
 import {Sort} from "src/libraries/Sort.sol";
 import {Math} from "src/libraries/Math.sol";
 import {Math as OZMath} from "@openzeppelin/contracts/utils/math/Math.sol";
+
 // EIP-712 struct hashing is implemented inline using OZ EIP712 utilities.
+
+// Custom errors for cheaper, typed reverts.
+error AdminZero();
+error ZeroFeedId();
+error FeedExists();
+error MinGreaterThanOps();
+error TooManyOps();
+error ZeroOperator();
+error DuplicateOperator();
+error NoFeed();
+error OpenRound();
+error DecimalsImmutable();
+error OperatorAlreadyExists();
+error NotOperator();
+error MaxOperatorsReached();
+error QuorumGreaterThanOps();
+error NoData();
+error BadRoundId();
+error HistoryEvicted();
+error FeedMismatch();
+error Expired();
+error OutOfBounds();
+error WrongRound();
+error RoundFull();
+error DuplicateSubmission();
+error DuplicateInBatch();
+error LengthMismatch();
+error EmptyBatch();
+error NoAnswers();
+error BadDecimals();
+error BadMinMax();
+error MinSubmissionsTooSmall();
+error MaxSubmissionsTooLarge();
+error MaxGreaterThanOperators();
+error TrimUnsupported();
+error BoundsInvalid();
+error MinPriceTooLow();
+error MaxPriceTooHigh();
+error DescriptionTooLong();
+error NoGating();
+error NotDue();
 
 contract PriceLoomOracle is
     AccessControl,
@@ -91,7 +133,7 @@ contract PriceLoomOracle is
     );
 
     constructor(address admin) EIP712("Price Loom", "1") {
-        require(admin != address(0), "admin=0");
+        if (admin == address(0)) revert AdminZero();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
         _grantRole(FEED_ADMIN_ROLE, admin);
@@ -107,19 +149,19 @@ contract PriceLoomOracle is
         OracleTypes.FeedConfig calldata cfg,
         address[] calldata operators
     ) external onlyRole(FEED_ADMIN_ROLE) {
-        require(feedId != bytes32(0), "zero feedId");
-        require(_feedConfig[feedId].decimals == 0, "Feed exists");
-        require(cfg.minSubmissions <= operators.length, "min > ops");
+        if (feedId == bytes32(0)) revert ZeroFeedId();
+        if (_feedConfig[feedId].decimals != 0) revert FeedExists();
+        if (cfg.minSubmissions > operators.length) revert MinGreaterThanOps();
         _validateConfig(cfg, operators.length);
         _feedConfig[feedId] = cfg;
 
         if (operators.length > 0) {
-            require(operators.length <= MAX_OPERATORS, "too many ops");
+            if (operators.length > MAX_OPERATORS) revert TooManyOps();
             _operators[feedId] = operators;
             for (uint8 i = 0; i < operators.length; i++) {
                 address op = operators[i];
-                require(op != address(0), "zero op");
-                require(_opIndex[feedId][op] == 0, "dup op");
+                if (op == address(0)) revert ZeroOperator();
+                if (_opIndex[feedId][op] != 0) revert DuplicateOperator();
                 _opIndex[feedId][op] = i + 1; // 1-based
                 emit OperatorAdded(feedId, op);
             }
@@ -133,7 +175,6 @@ contract PriceLoomOracle is
             startedAt: 0,
             updatedAt: 0,
             answeredInRound: 0,
-            finalized: false,
             stale: true,
             submissionCount: 0
         });
@@ -146,10 +187,10 @@ contract PriceLoomOracle is
         OracleTypes.FeedConfig calldata cfg
     ) external onlyRole(FEED_ADMIN_ROLE) {
         OracleTypes.FeedConfig storage prev = _feedConfig[feedId];
-        require(prev.decimals != 0, "No feed");
-        require(!_hasOpenRound(feedId), "open round");
+        if (prev.decimals == 0) revert NoFeed();
+        if (_hasOpenRound(feedId)) revert OpenRound();
         // Decimals are immutable per feed
-        require(cfg.decimals == prev.decimals, "decimals immutable");
+        if (cfg.decimals != prev.decimals) revert DecimalsImmutable();
         _validateConfig(cfg, _operators[feedId].length);
         _feedConfig[feedId] = cfg;
         emit FeedConfigUpdated(feedId, cfg);
@@ -159,11 +200,11 @@ contract PriceLoomOracle is
         bytes32 feedId,
         address op
     ) external onlyRole(FEED_ADMIN_ROLE) {
-        require(_feedConfig[feedId].decimals != 0, "No feed");
-        require(!_hasOpenRound(feedId), "open round");
-        require(op != address(0), "zero op");
-        require(_opIndex[feedId][op] == 0, "exists");
-        require(_operators[feedId].length < MAX_OPERATORS, "max ops");
+        if (_feedConfig[feedId].decimals == 0) revert NoFeed();
+        if (_hasOpenRound(feedId)) revert OpenRound();
+        if (op == address(0)) revert ZeroOperator();
+        if (_opIndex[feedId][op] != 0) revert OperatorAlreadyExists();
+        if (_operators[feedId].length >= MAX_OPERATORS) revert MaxOperatorsReached();
         _operators[feedId].push(op);
         _opIndex[feedId][op] = uint8(_operators[feedId].length); // 1-based
         emit OperatorAdded(feedId, op);
@@ -174,13 +215,14 @@ contract PriceLoomOracle is
         address op
     ) external onlyRole(FEED_ADMIN_ROLE) {
         uint8 idx1 = _opIndex[feedId][op];
-        require(idx1 != 0, "not op");
-        require(!_hasOpenRound(feedId), "open round");
+        if (idx1 == 0) revert NotOperator();
+        if (_hasOpenRound(feedId)) revert OpenRound();
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
         address[] storage ops = _operators[feedId];
         // enforce invariants post-removal to avoid bricking rounds
         uint256 newCount = ops.length - 1;
-        require(newCount >= cfg.minSubmissions, "quorum>ops");
+        if (newCount < cfg.minSubmissions) revert QuorumGreaterThanOps();
+        if (newCount < cfg.maxSubmissions) revert MaxGreaterThanOperators();
         uint256 idx = uint256(idx1 - 1);
         uint256 last = ops.length - 1;
         address lastOp = ops[last];
@@ -220,7 +262,7 @@ contract PriceLoomOracle is
         bytes32 feedId
     ) external view returns (int256 price, uint256 updatedAt) {
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
-        require(snap.updatedAt != 0, "NO_DATA");
+        if (snap.updatedAt == 0) revert NoData();
         return (snap.answer, snap.updatedAt);
     }
 
@@ -238,7 +280,7 @@ contract PriceLoomOracle is
         )
     {
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
-        require(snap.updatedAt != 0, "NO_DATA");
+        if (snap.updatedAt == 0) revert NoData();
         return (
             snap.roundId,
             snap.answer,
@@ -252,10 +294,10 @@ contract PriceLoomOracle is
         bytes32 feedId,
         uint80 roundId
     ) external view returns (uint80, int256, uint256, uint256, uint80) {
-        require(roundId > 0, "bad roundId");
+        if (roundId == 0) revert BadRoundId();
         uint256 idx = (uint256(roundId) - 1) & HISTORY_MASK;
         OracleTypes.RoundData storage r = _history[feedId][idx];
-        require(r.roundId == roundId, "HIST_EVICTED");
+        if (r.roundId != roundId) revert HistoryEvicted();
         return (
             r.roundId,
             r.answer,
@@ -277,13 +319,19 @@ contract PriceLoomOracle is
         return _latestRoundId[feedId];
     }
 
+    /// @notice Returns true if the latest snapshot should be treated as stale.
+    /// @dev Returns true if no data exists yet; if the snapshot was rolled forward on timeout;
+    ///      or if the age exceeds `maxStalenessSec`.
     function isStale(
         bytes32 feedId,
         uint256 maxStalenessSec
     ) external view returns (bool) {
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
-        if (snap.updatedAt == 0) return true;
-        return (block.timestamp - snap.updatedAt) > maxStalenessSec;
+        return (
+            snap.updatedAt == 0 ||
+            snap.stale ||
+            (block.timestamp - snap.updatedAt) > maxStalenessSec
+        );
     }
 
     // Operator introspection (for ops tooling)
@@ -359,17 +407,17 @@ contract PriceLoomOracle is
     ) external whenNotPaused nonReentrant {
         // basic feed + bounds checks
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
-        require(cfg.decimals != 0, "no feed");
-        require(sub.feedId == feedId, "feed mismatch");
-        require(block.timestamp <= sub.validUntil, "expired");
-        require(_withinBounds(feedId, sub.answer), "out of bounds");
+        if (cfg.decimals == 0) revert NoFeed();
+        if (sub.feedId != feedId) revert FeedMismatch();
+        if (block.timestamp > sub.validUntil) revert Expired();
+        if (!_withinBounds(feedId, sub.answer, cfg)) revert OutOfBounds();
 
         // recover signer and ensure it is an operator
         bytes32 structHash = _priceSubmissionStructHash(sub);
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, sig);
         uint8 opIdx = _opIndex[feedId][signer];
-        require(opIdx != 0, "not operator");
+        if (opIdx == 0) revert NotOperator();
 
         // Handle timed-out open round first (finalize at quorum or roll stale)
         _handleTimeoutIfNeeded(feedId);
@@ -383,26 +431,23 @@ contract PriceLoomOracle is
             // no open round: must be due to start a new one
             OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
             bool firstEver = (snap.updatedAt == 0);
-            require(
-                firstEver || _shouldStartNewRound(feedId, sub.answer),
-                "not due"
-            );
+            if (!(firstEver || _shouldStartNewRound(feedId, sub.answer, snap, cfg))) revert NotDue();
             // ensure signed round matches the one we are about to open
-            require(sub.roundId == openId, "wrong round");
+            if (sub.roundId != openId) revert WrongRound();
             _roundStartedAt[feedId][openId] = block.timestamp;
             emit RoundStarted(feedId, openId, block.timestamp);
         } else {
             // open round exists: signature must target it
-            require(sub.roundId == openId, "wrong round");
+            if (sub.roundId != openId) revert WrongRound();
         }
 
         uint8 n = _answerCount[feedId][openId];
-        require(n < cfg.maxSubmissions, "round full");
+        if (n >= cfg.maxSubmissions) revert RoundFull();
 
         // dedupe signer per round
         uint256 mask = (uint256(1) << (opIdx - 1));
         uint256 bitmap = _submittedBitmap[feedId][openId];
-        require(bitmap & mask == 0, "duplicate");
+        if (bitmap & mask != 0) revert DuplicateSubmission();
         _submittedBitmap[feedId][openId] = bitmap | mask;
 
         // record answer
@@ -422,9 +467,9 @@ contract PriceLoomOracle is
         PriceSubmission[] calldata subs,
         bytes[] calldata sigs
     ) external whenNotPaused nonReentrant {
-        require(subs.length == sigs.length, "length mismatch");
+        if (subs.length != sigs.length) revert LengthMismatch();
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
-        require(cfg.decimals != 0, "no feed");
+        if (cfg.decimals == 0) revert NoFeed();
 
         // Handle timed-out open round first (finalize at quorum or roll stale)
         _handleTimeoutIfNeeded(feedId);
@@ -434,79 +479,78 @@ contract PriceLoomOracle is
         uint80 openId = latest + 1;
         bool hasOpen = _roundStartedAt[feedId][openId] != 0;
 
+        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+
         if (!hasOpen) {
             // allow opening only when due; gate based on first item
-            require(subs.length > 0, "empty batch");
+            if (subs.length == 0) revert EmptyBatch();
             PriceSubmission calldata first = subs[0];
 
-            OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
             bool firstEver = (snap.updatedAt == 0);
-            require(
-                firstEver || _shouldStartNewRound(feedId, first.answer),
-                "not due"
-            );
+            if (!(firstEver || _shouldStartNewRound(feedId, first.answer, snap, cfg)))
+                revert NotDue();
 
-            require(first.feedId == feedId, "feed mismatch");
-            require(first.roundId == openId, "wrong round");
-            require(block.timestamp <= first.validUntil, "expired");
-            require(_withinBounds(feedId, first.answer), "out of bounds");
+            if (first.feedId != feedId) revert FeedMismatch();
+            if (first.roundId != openId) revert WrongRound();
+            if (block.timestamp > first.validUntil) revert Expired();
+            if (!_withinBounds(feedId, first.answer, cfg)) revert OutOfBounds();
 
             _roundStartedAt[feedId][openId] = block.timestamp;
             emit RoundStarted(feedId, openId, block.timestamp);
         }
 
         uint8 n_ = _answerCount[feedId][openId];
-        require(n_ < cfg.maxSubmissions, "round full");
+        if (n_ >= cfg.maxSubmissions) revert RoundFull();
 
         // dedupe signers within this batch using operator index bits
         uint256 batchMask = 0;
+        uint256 onchainBitmap = _submittedBitmap[feedId][openId];
 
         for (uint256 i = 0; i < subs.length; i++) {
             PriceSubmission calldata sub = subs[i];
-            bytes calldata sig = sigs[i];
 
             // per-item sanity
-            require(sub.feedId == feedId, "feed mismatch");
-            require(sub.roundId == openId, "wrong round");
-            require(block.timestamp <= sub.validUntil, "expired");
-            require(_withinBounds(feedId, sub.answer), "out of bounds");
+            if (sub.feedId != feedId) revert FeedMismatch();
+            if (sub.roundId != openId) revert WrongRound();
+            if (block.timestamp > sub.validUntil) revert Expired();
+            if (!_withinBounds(feedId, sub.answer, cfg)) revert OutOfBounds();
 
             // recover signer and map to operator index
             bytes32 structHash = _priceSubmissionStructHash(sub);
             bytes32 digest = _hashTypedDataV4(structHash);
-            address signer = ECDSA.recover(digest, sig);
+            address signer = ECDSA.recover(digest, sigs[i]);
             uint8 opIdx = _opIndex[feedId][signer];
-            require(opIdx != 0, "not operator");
+            if (opIdx == 0) revert NotOperator();
 
             uint256 bit = (uint256(1) << (opIdx - 1));
 
             // reject duplicates within batch and across on-chain bitmap
-            require(batchMask & bit == 0, "dup in batch");
+            if (batchMask & bit != 0) revert DuplicateInBatch();
             batchMask |= bit;
 
-            uint256 onchain = _submittedBitmap[feedId][openId];
-            require(onchain & bit == 0, "duplicate");
-            _submittedBitmap[feedId][openId] = onchain | bit;
+            if (onchainBitmap & bit != 0) revert DuplicateSubmission();
 
             // record answer
-            require(n_ < cfg.maxSubmissions, "round full");
+            if (n_ >= cfg.maxSubmissions) revert RoundFull();
             _answers[feedId][openId][n_] = sub.answer;
             n_++;
 
             emit SubmissionReceived(feedId, openId, signer, sub.answer);
 
             if (n_ == cfg.maxSubmissions) {
+                _submittedBitmap[feedId][openId] = onchainBitmap | batchMask;
                 _answerCount[feedId][openId] = n_;
                 _finalizeRound(feedId, openId);
                 return;
             }
         }
+        _submittedBitmap[feedId][openId] = onchainBitmap | batchMask;
         _answerCount[feedId][openId] = n_;
     }
 
     function _finalizeRound(bytes32 feedId, uint80 roundId) internal {
         uint8 n = _answerCount[feedId][roundId];
-        require(n > 0, "no answers");
+        if (n == 0) revert NoAnswers();
 
         int256[] memory buf = new int256[](n);
         for (uint8 i = 0; i < n; i++) {
@@ -530,7 +574,6 @@ contract PriceLoomOracle is
         snap.startedAt = _roundStartedAt[feedId][roundId];
         snap.updatedAt = block.timestamp;
         snap.answeredInRound = roundId;
-        snap.finalized = true;
         snap.stale = false;
         snap.submissionCount = n;
 
@@ -548,7 +591,6 @@ contract PriceLoomOracle is
             slot.startedAt = snap.startedAt;
             slot.updatedAt = snap.updatedAt;
             slot.answeredInRound = snap.answeredInRound;
-            slot.finalized = snap.finalized;
             slot.stale = snap.stale;
             slot.submissionCount = snap.submissionCount;
         }
@@ -589,37 +631,39 @@ contract PriceLoomOracle is
         OracleTypes.FeedConfig calldata cfg,
         uint256 opCount
     ) internal pure {
-        require(cfg.decimals > 0 && cfg.decimals <= 18, "bad decimals");
-        require(cfg.maxSubmissions >= cfg.minSubmissions, "bad min/max");
-        require(cfg.minSubmissions >= 1, "min >=1");
-        require(cfg.maxSubmissions <= MAX_OPERATORS, "max too large");
-        require(cfg.minSubmissions <= opCount, "quorum > operators");
+        if (!(cfg.decimals > 0 && cfg.decimals <= 18)) revert BadDecimals();
+        if (cfg.maxSubmissions < cfg.minSubmissions) revert BadMinMax();
+        if (cfg.minSubmissions < 1) revert MinSubmissionsTooSmall();
+        if (cfg.maxSubmissions > MAX_OPERATORS) revert MaxSubmissionsTooLarge();
+        if (cfg.minSubmissions > opCount) revert QuorumGreaterThanOps();
         if (opCount > 0) {
-            require(opCount <= MAX_OPERATORS, "too many ops");
-            require(cfg.maxSubmissions <= opCount, "max > operators");
+            if (opCount > MAX_OPERATORS) revert TooManyOps();
+            if (cfg.maxSubmissions > opCount) revert MaxGreaterThanOperators();
         }
-        require(cfg.trim == 0, "trim unsupported v0");
-        require(cfg.maxPrice >= cfg.minPrice, "bounds");
-        require(cfg.minPrice != type(int256).min, "minPrice too low");
-        require(cfg.maxPrice != type(int256).max, "maxPrice too high");
-        require(bytes(cfg.description).length <= 100, "desc too long");
+        if (cfg.trim != 0) revert TrimUnsupported();
+        if (cfg.maxPrice < cfg.minPrice) revert BoundsInvalid();
+        if (cfg.minPrice == type(int256).min) revert MinPriceTooLow();
+        if (cfg.maxPrice == type(int256).max) revert MaxPriceTooHigh();
+        if (bytes(cfg.description).length > 100) revert DescriptionTooLong();
         // Require at least one round gating mechanism
-        require(cfg.heartbeatSec > 0 || cfg.deviationBps > 0, "no gating");
+        if (!(cfg.heartbeatSec > 0 || cfg.deviationBps > 0)) revert NoGating();
     }
 
     // Bounds check: price within [minPrice, maxPrice]
     function _withinBounds(
         bytes32 feedId,
-        int256 answer
-    ) internal view returns (bool) {
-        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
+        int256 answer,
+        OracleTypes.FeedConfig memory cfg
+    ) internal pure returns (bool) {
         return answer >= cfg.minPrice && answer <= cfg.maxPrice;
     }
 
     // Has heartbeat elapsed since last update?
-    function _heartbeatElapsed(bytes32 feedId) internal view returns (bool) {
-        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
-        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
+    function _heartbeatElapsed(
+        bytes32 feedId,
+        OracleTypes.RoundData storage snap,
+        OracleTypes.FeedConfig storage cfg
+    ) internal view returns (bool) {
         if (cfg.heartbeatSec == 0) return false;
         if (snap.updatedAt == 0) return true; // no prior answer → allow first round
         return (block.timestamp - snap.updatedAt) >= cfg.heartbeatSec;
@@ -628,12 +672,12 @@ contract PriceLoomOracle is
     // Does proposed answer exceed deviation threshold vs last?
     function _exceedsDeviation(
         bytes32 feedId,
-        int256 proposed
+        int256 proposed,
+        OracleTypes.RoundData storage snap,
+        OracleTypes.FeedConfig storage cfg
     ) internal view returns (bool) {
-        OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
         if (cfg.deviationBps == 0) return false;
 
-        OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
         if (snap.updatedAt == 0) return true; // no prior answer → allow first round
 
         int256 last = snap.answer;
@@ -646,15 +690,20 @@ contract PriceLoomOracle is
         uint256 diff = Math.absDiffSignedToUint(proposed, last);
 
         // Exact and overflow-safe: (diff * 10_000) / lastAbs >= deviationBps
-        return OZMath.mulDiv(diff, 10_000, lastAbs) >= uint256(cfg.deviationBps);
+        return
+            OZMath.mulDiv(diff, 10_000, lastAbs) >= uint256(cfg.deviationBps);
     }
 
     // Gate to decide if a new round should start on next submission
     function _shouldStartNewRound(
         bytes32 feedId,
-        int256 proposed
+        int256 proposed,
+        OracleTypes.RoundData storage snap,
+        OracleTypes.FeedConfig storage cfg
     ) internal view returns (bool) {
-        return _heartbeatElapsed(feedId) || _exceedsDeviation(feedId, proposed);
+        return
+            _heartbeatElapsed(feedId, snap, cfg) ||
+            _exceedsDeviation(feedId, proposed, snap, cfg);
     }
 
     // ============ Public Helpers (off-chain ergonomics) ============
@@ -674,7 +723,13 @@ contract PriceLoomOracle is
         bytes32 feedId,
         int256 proposed
     ) external view returns (bool) {
-        return _shouldStartNewRound(feedId, proposed);
+        return
+            _shouldStartNewRound(
+                feedId,
+                proposed,
+                _latestSnapshot[feedId],
+                _feedConfig[feedId]
+            );
     }
 
     // Timeout handling
@@ -717,8 +772,9 @@ contract PriceLoomOracle is
 
     /**
      * @dev Rolls a feed forward with a stale price when a round times out without quorum.
-     * Carries the last finalized answer forward into a new round record, but marks it as stale.
-     * This ensures liveness, signaling to consumers that the price has not been recently updated.
+     * Carries the last finalized answer forward into a new round record, marks it as stale, and
+     * preserves both `answeredInRound` and the previous `updatedAt`. This keeps
+     * AggregatorV3-style consumers (age and freshness checks) behaving correctly.
      * @param feedId The feed being rolled forward.
      * @param roundId The new roundId being created.
      * @param submissions The number of submissions received before timeout (less than quorum).
@@ -733,13 +789,14 @@ contract PriceLoomOracle is
         // Cache fields before mutation to avoid double-aliasing reads/writes
         int256 lastAnswer = snap.answer;
         uint80 lastAnsweredInRound = snap.answeredInRound;
+        uint256 lastUpdatedAt = snap.updatedAt;
 
         snap.roundId = roundId;
         snap.answer = lastAnswer;
         snap.startedAt = _roundStartedAt[feedId][roundId];
-        snap.updatedAt = block.timestamp;
+        // Preserve previous updatedAt so age-based consumers treat this as stale
+        snap.updatedAt = lastUpdatedAt;
         snap.answeredInRound = lastAnsweredInRound; // unchanged
-        snap.finalized = true;
         snap.stale = true;
         snap.submissionCount = submissions;
 
@@ -758,7 +815,6 @@ contract PriceLoomOracle is
             slot.startedAt = snap.startedAt;
             slot.updatedAt = snap.updatedAt;
             slot.answeredInRound = snap.answeredInRound;
-            slot.finalized = snap.finalized;
             slot.stale = snap.stale;
             slot.submissionCount = snap.submissionCount;
         }

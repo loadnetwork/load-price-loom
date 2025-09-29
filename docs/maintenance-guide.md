@@ -116,6 +116,16 @@ echo $CODE # non-empty if deployed
 - `latestFinalizedRoundId(feedId)` returns the last finalized round id.
 - `RoundStarted`, `RoundFinalized`, and `PriceUpdated` events describe lifecycle transitions.
 
+### Stale Roll‑Forward Semantics (DeFi‑compatible)
+- When a round times out below quorum and the oracle rolls forward the previous answer, the oracle:
+  - Marks the snapshot as `stale = true`.
+  - Preserves `answeredInRound` from the last finalized round (so `answeredInRound < roundId`).
+  - Preserves the previous `updatedAt` timestamp (does NOT set it to `block.timestamp`).
+- This mirrors common AggregatorV3 consumer patterns:
+  - Age checks like `block.timestamp - updatedAt <= MAX_DELAY` will treat rolled‑forward prices as stale.
+  - Freshness checks like `roundId == answeredInRound` will fail for rolled‑forward prices.
+- A convenience view `isStale(feedId, maxStalenessSec)` returns true if there is no data yet, if the snapshot is explicitly marked stale, or if `updatedAt` exceeds the max staleness window.
+
 ## Best Practices
 - Plan operator/config changes: pause → poke (if needed) → change → unpause.
 - Keep `minSubmissions ≤ maxSubmissions ≤ operatorCount`.

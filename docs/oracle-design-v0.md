@@ -45,7 +45,6 @@ struct RoundData {
     uint256 startedAt;
     uint256 updatedAt;
     uint80  answeredInRound;
-    bool    finalized;
     bool    stale;
     uint8   submissionCount;
 }
@@ -175,7 +174,7 @@ Finalization:
 - Sort the `submissionCount` answers (small fixed array; insertion sort).
 - If odd → choose median element.
 - If even → average the two middle values; round half up.
-- Update `latestAnswer`, `latestTimestamp = now`, `answeredInRound = roundId`, set `finalized = true`, `stale = false`.
+- Update `latestAnswer`, `latestTimestamp = now`, `answeredInRound = roundId`, set `stale = false`.
 - Emit `RoundFinalized` and `PriceUpdated`.
 - Store finalized snapshot into ring buffer (capacity 128). Older rounds are evicted.
 

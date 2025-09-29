@@ -21,7 +21,6 @@ library OracleTypes {
         uint256 startedAt;
         uint256 updatedAt;
         uint80 answeredInRound;
-        bool finalized;
         bool stale;
         uint8 submissionCount;
     }
