@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
 import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 
+// Basic config and operator introspection tests.
+// - Verifies feed creation stores config as provided
+// - Verifies operator count and membership tracking
 contract OracleBasicTest is Test {
     PriceLoomOracle internal oracle;
 
@@ -39,6 +42,7 @@ contract OracleBasicTest is Test {
         oracle.createFeed(FEED, cfg, ops);
     }
 
+    // Ensure the feed config stored on-chain matches the input values
     function test_configCreated() public view {
         OracleTypes.FeedConfig memory cfg = oracle.getConfig(FEED);
         assertEq(cfg.decimals, 8);
@@ -50,6 +54,7 @@ contract OracleBasicTest is Test {
         assertEq(cfg.description, "AR/byte");
     }
 
+    // Ensure operator count and isOperator() reflect the initial operator set
     function test_operatorCount() public view {
         assertEq(oracle.operatorCount(FEED), 3);
         assertTrue(oracle.isOperator(FEED, ops[0]));

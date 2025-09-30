@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {AggregatorV3Interface} from "src/interfaces/AggregatorV3Interface.sol";

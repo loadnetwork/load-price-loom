@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
@@ -8,6 +8,10 @@ import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 import {PriceLoomAdapterFactory, FeedNotFound} from "src/adapter/PriceLoomAdapterFactory.sol";
 import {PriceLoomAggregatorV3Adapter} from "src/adapter/PriceLoomAggregatorV3Adapter.sol";
 
+// Adapter factory tests.
+// - Rejects deploying adapters for unknown feeds
+// - Non-deterministic deployment works and adapter exposes oracle metadata
+// - Deterministic CREATE2 deployment address matches factory prediction
 contract AdapterFactoryTest is Test {
     PriceLoomOracle internal oracle;
     PriceLoomAdapterFactory internal factory;
@@ -41,6 +45,7 @@ contract AdapterFactoryTest is Test {
         oracle.createFeed(FEED, cfg, ops);
     }
 
+    // Factory should revert deploying adapter if the feed does not exist
     function test_factoryRejectsUnknownFeed() public {
         vm.expectRevert(FeedNotFound.selector);
         factory.deployAdapter(FEED);
@@ -49,6 +54,7 @@ contract AdapterFactoryTest is Test {
         factory.deployAdapterDeterministic(FEED);
     }
 
+    // Deploy adapter and verify decimals/description; latestRoundData reverts before any price
     function test_deployAdapterAndQuery() public {
         _createFeed();
         address adapter = factory.deployAdapter(FEED);
@@ -64,6 +70,7 @@ contract AdapterFactoryTest is Test {
         PriceLoomAggregatorV3Adapter(adapter).latestRoundData();
     }
 
+    // Deterministic address predicted via computeAdapterAddress must equal deployed address
     function test_deterministicAddress() public {
         _createFeed();
         address deployed = factory.deployAdapterDeterministic(FEED);

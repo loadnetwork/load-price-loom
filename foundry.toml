@@ -8,4 +8,10 @@ via_ir = true
 solc_version = "0.8.30"
 evm_version = "prague"
 
+[profile.test]
+evm_version = "prague"
+
+[profile.script]
+evm_version = "prague"
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

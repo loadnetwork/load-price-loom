@@ -1,13 +1,27 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
 import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
-import {NoData, WrongRound, Expired, OutOfBounds, DuplicateSubmission} from "src/oracle/PriceLoomOracle.sol";
+import {
+    NoData,
+    WrongRound,
+    Expired,
+    OutOfBounds,
+    DuplicateSubmission,
+    NotOperator,
+    FeedMismatch
+} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
+// Submission/round lifecycle tests covering:
+// - Opening rounds, finalization at maxSubmissions, median computation
+// - Batch submission path and finalization
+// - Timeout-driven finalization at quorum
+// - Stale price roll-forward below quorum
+// - Error paths: WrongRound, Expired, OutOfBounds, DuplicateSubmission
 contract OracleSubmissionsTest is Test {
     PriceLoomOracle internal oracle;
 
@@ -43,11 +57,13 @@ contract OracleSubmissionsTest is Test {
         oracle.createFeed(FEED, cfg, ops);
     }
 
+    // No open or finalized rounds at start
     function test_initialRoundState() public view {
         assertEq(oracle.currentRoundId(FEED), 0);
         assertEq(oracle.latestFinalizedRoundId(FEED), 0);
     }
 
+    // Finalize at maxSubmissions; verify median, timestamp
     function test_submitAndFinalize() public {
         // Round 1 starts with first submission
         uint80 roundId = 1;
@@ -75,6 +91,7 @@ contract OracleSubmissionsTest is Test {
         assertEq(updatedAt, block.timestamp, "Timestamp wrong");
     }
 
+    // Batch path should validate, record, and finalize in one call
     function test_submitBatchAndFinalize() public {
         uint80 roundId = 1;
         int256[] memory prices = new int256[](3);
@@ -105,6 +122,7 @@ contract OracleSubmissionsTest is Test {
         assertEq(updatedAt, block.timestamp, "Timestamp wrong");
     }
 
+    // With minSubmissions reached but not max, timeout should finalize to current median
     function test_quorumAndTimeout() public {
         uint80 roundId = 1;
         int256 price1 = 100e8;
@@ -132,6 +150,7 @@ contract OracleSubmissionsTest is Test {
         assertEq(updatedAt, block.timestamp, "Timestamp wrong");
     }
 
+    // Below quorum on timeout should roll forward stale answer preserving answeredInRound and updatedAt
     function test_stalePriceForwarding() public {
         // First, establish a price in round 1
         uint80 roundId1 = 1;
@@ -161,6 +180,7 @@ contract OracleSubmissionsTest is Test {
         assertTrue(oracle.isStale(FEED, 0), "Price should be stale");
     }
 
+    // Submitting for a non-open round should revert WrongRound
     function test_revert_wrongRoundId() public {
         uint80 roundId = 2; // Round 1 is not started yet
         int256 price = 100e8;
@@ -174,6 +194,7 @@ contract OracleSubmissionsTest is Test {
         _submitExpectRevert(0, sub, WrongRound.selector);
     }
 
+    // Expired signature must revert
     function test_revert_expiredSignature() public {
         uint80 roundId = 1;
         int256 price = 100e8;
@@ -193,6 +214,7 @@ contract OracleSubmissionsTest is Test {
         oracle.submitSigned(FEED, sub, sig);
     }
 
+    // Answer outside configured bounds must revert
     function test_revert_outOfBounds() public {
         uint80 roundId = 1;
         int256 price = 2e20; // > maxPrice
@@ -206,6 +228,7 @@ contract OracleSubmissionsTest is Test {
         _submitExpectRevert(0, sub, OutOfBounds.selector);
     }
 
+    // Same operator cannot submit twice into the same round
     function test_revert_duplicateSubmission() public {
         uint80 roundId = 1;
         int256 price = 100e8;
@@ -221,6 +244,80 @@ contract OracleSubmissionsTest is Test {
         _submitExpectRevert(0, sub, DuplicateSubmission.selector);
     }
 
+    function test_notOperator_reverts() public {
+        uint80 roundId = 1;
+        int256 price = 100e8;
+        (address notOp, uint256 notOpKey) = makeAddrAndKey("not-an-operator");
+
+        PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
+            feedId: FEED,
+            roundId: roundId,
+            answer: price,
+            validUntil: block.timestamp + 60
+        });
+
+        bytes32 digest = oracle.getTypedDataHash(sub);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(notOpKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(NotOperator.selector);
+        oracle.submitSigned(FEED, sub, sig);
+    }
+
+    function test_feedMismatch_reverts() public {
+        uint80 roundId = 1;
+        int256 price = 100e8;
+
+        PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
+            feedId: keccak256("wrong-feed"),
+            roundId: roundId,
+            answer: price,
+            validUntil: block.timestamp + 60
+        });
+        _submitExpectRevert(0, sub, FeedMismatch.selector);
+    }
+
+    function test_roundFull_reverts_on_extra_submission() public {
+        uint80 roundId = 1;
+        _submit(0, roundId, 100e8);
+        _submit(1, roundId, 101e8);
+        _submit(2, roundId, 102e8);
+
+        // Round is now full and finalized
+        (address notOp,) = makeAddrAndKey("not-an-operator");
+        PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
+            feedId: FEED,
+            roundId: roundId,
+            answer: 103e8,
+            validUntil: block.timestamp + 60
+        });
+        _submitExpectRevert(0, sub, WrongRound.selector);
+    }
+
+    function test_even_count_median_negative_rounding() public {
+        uint80 roundId = 1;
+        _submit(0, roundId, -100e8);
+        _submit(1, roundId, -101e8);
+
+        vm.warp(block.timestamp + 901);
+        oracle.poke(FEED);
+
+        (, int256 answer,,,) = oracle.latestRoundData(FEED);
+        assertEq(answer, -1005e7); // (-100 - 101) / 2 = -100.5
+    }
+
+    function test_timeout_without_prior_data_keeps_NoData() public {
+        uint80 roundId = 1;
+        _submit(0, roundId, 100e8);
+
+        vm.warp(block.timestamp + 901);
+        oracle.poke(FEED);
+
+        vm.expectRevert(NoData.selector);
+        oracle.latestRoundData(FEED);
+    }
+
+    // Helper: sign and attempt submit expecting the provided revert selector
     function _submitExpectRevert(uint256 opIdx, PriceLoomOracle.PriceSubmission memory sub, bytes4 selector) internal {
         bytes32 digest = oracle.getTypedDataHash(sub);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pkeys[opIdx], digest);
@@ -229,6 +326,7 @@ contract OracleSubmissionsTest is Test {
         oracle.submitSigned(FEED, sub, sig);
     }
 
+    // Helper: sign and submit once for operator opIdx
     function _submit(uint256 opIdx, uint80 roundId, int256 answer) internal {
         PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
             feedId: FEED,

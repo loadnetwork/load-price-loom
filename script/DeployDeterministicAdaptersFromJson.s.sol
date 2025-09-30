@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Script} from "forge-std/Script.sol";
 import "forge-std/console2.sol";
 import {stdJson} from "forge-std/StdJson.sol";
-import {IOracleReader} from "src/interfaces/IOracleReader.sol";
 import {PriceLoomAdapterFactory} from "src/adapter/PriceLoomAdapterFactory.sol";
 
 /// Deploy deterministic adapters via factory for feeds defined in JSON.

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
 import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 
+// Gating behavior tests for deviation- and heartbeat-based round starts.
+// - Deviation gating: equality to threshold should allow a new round
+// - Heartbeat gating: equality to heartbeatSec should allow a new round
 contract OracleGatingTest is Test {
     PriceLoomOracle internal oracle;
 
@@ -21,6 +24,7 @@ contract OracleGatingTest is Test {
         (ops[0], pkeys[0]) = makeAddrAndKey("op0");
     }
 
+    // Equal-to-threshold deviation should trigger a new round
     function test_deviationThreshold_equalTriggers() public {
         OracleTypes.FeedConfig memory cfg = OracleTypes.FeedConfig({
             decimals: 8,
@@ -45,6 +49,7 @@ contract OracleGatingTest is Test {
         assertEq(rid, 2, "round 2 should finalize");
     }
 
+    // Equal-to-heartbeatSec elapsed time should trigger a new round even with same price
     function test_heartbeatElapsed_equalTriggers() public {
         OracleTypes.FeedConfig memory cfg = OracleTypes.FeedConfig({
             decimals: 8,
@@ -70,6 +75,7 @@ contract OracleGatingTest is Test {
         assertEq(rid, 2, "round 2 should finalize after heartbeat");
     }
 
+    // Helper: sign and submit a single PriceSubmission for operator opIdx
     function _submit(uint256 opIdx, uint80 roundId, int256 answer) internal {
         PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
             feedId: FEED,

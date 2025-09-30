@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
@@ -7,6 +7,9 @@ import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 import {HistoryEvicted} from "src/oracle/PriceLoomOracle.sol";
 
+// History ring buffer tests.
+// - Ensures data older than 128 rounds is evicted and reverts with HistoryEvicted
+// - Ensures latest rounds remain retrievable
 contract OracleHistoryTest is Test {
     PriceLoomOracle internal oracle;
 
@@ -37,6 +40,7 @@ contract OracleHistoryTest is Test {
         oracle.createFeed(FEED, cfg, ops);
     }
 
+    // After pushing > HISTORY_CAPACITY (128) rounds, the earliest should be evicted
     function test_ringBufferEviction_after128() public {
         uint80 rounds = 130;
         int256 price = 100e8;
@@ -55,6 +59,7 @@ contract OracleHistoryTest is Test {
         assertEq(rid, rounds, "latest round missing");
     }
 
+    // Helper: sign and submit once to finalize single-op rounds
     function _submit(uint256 opIdx, uint80 roundId, int256 answer) internal {
         PriceLoomOracle.PriceSubmission memory sub = PriceLoomOracle.PriceSubmission({
             feedId: FEED,

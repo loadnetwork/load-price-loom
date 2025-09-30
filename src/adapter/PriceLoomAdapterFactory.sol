@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {PriceLoomAggregatorV3Adapter} from "./PriceLoomAggregatorV3Adapter.sol";
 import {IOracleReader} from "../interfaces/IOracleReader.sol";
@@ -35,8 +35,10 @@ contract PriceLoomAdapterFactory {
     /// @notice Predict the deterministic adapter address for a feedId using CREATE2.
     /// @dev Uses salt = feedId and constructor args (oracle, feedId).
     function computeAdapterAddress(bytes32 feedId) external view returns (address predicted) {
+        // CREATE2 address prediction must hash the actual init code bytes:
+        // init_code = creationCode || abi.encode(constructor_args)
         bytes32 initCodeHash =
-            keccak256(abi.encodePacked(type(PriceLoomAggregatorV3Adapter).creationCode, abi.encode(oracle, feedId)));
+            keccak256(bytes.concat(type(PriceLoomAggregatorV3Adapter).creationCode, abi.encode(oracle, feedId)));
         predicted = Create2.computeAddress(feedId, initCodeHash, address(this));
     }
 }

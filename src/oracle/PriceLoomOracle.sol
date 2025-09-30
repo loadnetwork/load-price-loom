@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
@@ -14,7 +14,7 @@ import {IOracleReader} from "src/interfaces/IOracleReader.sol";
 import {IOracleAdmin} from "src/interfaces/IOracleAdmin.sol";
 
 import {Sort} from "src/libraries/Sort.sol";
-import {Math} from "src/libraries/Math.sol";
+import {PriceLoomMath} from "src/libraries/PriceLoomMath.sol";
 import {Math as OZMath} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 // EIP-712 struct hashing is implemented inline using OZ EIP712 utilities.
@@ -320,8 +320,8 @@ contract PriceLoomOracle is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
 
     function submitSigned(bytes32 feedId, PriceSubmission calldata sub, bytes calldata sig)
         external
-        whenNotPaused
         nonReentrant
+        whenNotPaused
     {
         // basic feed + bounds checks
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
@@ -382,8 +382,8 @@ contract PriceLoomOracle is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
 
     function submitSignedBatch(bytes32 feedId, PriceSubmission[] calldata subs, bytes[] calldata sigs)
         external
-        whenNotPaused
         nonReentrant
+        whenNotPaused
     {
         if (subs.length != sigs.length) revert LengthMismatch();
         OracleTypes.FeedConfig storage cfg = _feedConfig[feedId];
@@ -484,7 +484,7 @@ contract PriceLoomOracle is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
         } else {
             int256 a = buf[(n / 2) - 1];
             int256 b = buf[n / 2];
-            median = Math.avgRoundHalfUpSigned(a, b);
+            median = PriceLoomMath.avgRoundHalfUpSigned(a, b);
         }
 
         OracleTypes.RoundData storage snap = _latestSnapshot[feedId];
@@ -598,8 +598,8 @@ contract PriceLoomOracle is AccessControl, Pausable, ReentrancyGuard, EIP712, IO
         }
 
         // absolute values (overflow-safe)
-        uint256 lastAbs = Math.absSignedToUint(last);
-        uint256 diff = Math.absDiffSignedToUint(proposed, last);
+        uint256 lastAbs = PriceLoomMath.absSignedToUint(last);
+        uint256 diff = PriceLoomMath.absDiffSignedToUint(proposed, last);
 
         // Exact and overflow-safe: (diff * 10_000) / lastAbs >= deviationBps
         return OZMath.mulDiv(diff, 10_000, lastAbs) >= uint256(cfg.deviationBps);

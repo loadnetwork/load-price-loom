@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity 0.8.30;
 
 import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {IOracleReader} from "../interfaces/IOracleReader.sol";
@@ -11,11 +11,10 @@ contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
     bytes32 public immutable feedId;
 
     constructor(IOracleReader oracle_, bytes32 feedId_) {
-        // Ensure the feed exists to avoid deploying unusable adapters.
-        OracleTypes.FeedConfig memory cfg = oracle_.getConfig(feedId_);
-        require(cfg.decimals != 0, "feed not found");
         oracle = oracle_;
         feedId = feedId_;
+        OracleTypes.FeedConfig memory cfg = oracle.getConfig(feedId);
+        require(cfg.decimals != 0, "feed not found");
     }
 
     function decimals() external view override returns (uint8) {
