@@ -48,14 +48,17 @@ This workflow lets you deploy and interact with the entire oracle system on a lo
 2.  **Start a Local Node:**
     In a separate terminal, start a local Anvil node.
     ```bash
+    # Default Anvil chain-id is 31337. If you want it to match Alphanet (9496), use:
+    # anvil --chain-id 9496
     anvil
     ```
 
 3.  **Deploy Everything:**
     The `bootstrap-all` command deploys a new oracle, a new factory, and then configures all feeds and adapters from `feeds.json` in a single step. The `ADMIN` for the oracle will be Anvil's default deployer address, taken from the `PRIVATE_KEY` in your `.env` file.
     ```bash
-    # This command reads .env for the ADMIN private key and RPC_URL (defaults to http://localhost:8545)
-    make bootstrap-all
+    # This command reads .env for the ADMIN private key and RPC_URL
+    # Tip: use the anvil- prefix to auto-set RPC/chain-id for local dev
+    make anvil-bootstrap-all
     ```
     You will see the deployed addresses of the oracle and factory, followed by the feeds and adapters created.
 
@@ -81,9 +84,10 @@ Manually deploy the `PriceLoomOracle` contract, passing the secure admin address
 ```bash
 # Set the address of the newly deployed oracle
 export ORACLE=0xYourOracleAddress
-
-# This command reads your .env for the deployer's PRIVATE_KEY and RPC_URL
-make deploy-factory
+# Alphanet (chain-id 9496)
+make alphanet-deploy-factory
+# or, explicitly
+# make deploy-factory RPC_URL=https://alphanet.load.network CHAIN_ID=9496
 ```
 Note the logged address of the new `PriceLoomAdapterFactory`.
 
@@ -91,18 +95,14 @@ Note the logged address of the new `PriceLoomAdapterFactory`.
 This step reads `feeds.json` and calls `createFeed` for each entry.
 ```bash
 export ORACLE=0xYourOracleAddress
-
-# This command reads your .env for the admin's PRIVATE_KEY
-make create-feeds-json
+make alphanet-create-feeds-json
 ```
 
 **Step 4: Deploy Feed Adapters**
 This deploys the deterministic `AggregatorV3Adapter` for each feed.
 ```bash
 export FACTORY=0xYourFactoryAddress
-
-# This command reads your .env for the deployer's PRIVATE_KEY
-make deploy-adapters-json
+make alphanet-deploy-adapters-json
 ```
 
 ### Maintenance
@@ -112,7 +112,7 @@ make deploy-adapters-json
 - **Poking Stuck Rounds:** The `poke-feeds-json` target is a convenient way to handle timeouts for all feeds defined in your `feeds.json`.
   ```bash
   export ORACLE=0xYourOracleAddress
-  make poke-feeds-json
+  make alphanet-poke-feeds-json
   ```
 
 ---
@@ -129,13 +129,14 @@ anvil --chain-id 31337
 2) Bootstrap oracle + factory + feeds + adapters using the Anvil feed config:
 ```bash
 export ADMIN=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266  # anvil[0]
-make bootstrap-all RPC_URL=http://127.0.0.1:8545 FEEDS_FILE=feeds-anvil.json
+make anvil-bootstrap-all FEEDS_FILE=feeds-anvil.json
 ```
 
 3) Deploy the example consumer bound to the adapter (set ADAPTER to the logged adapter address):
 ```bash
 export ADAPTER=0xAdapter
-forge script script/DeployTestConsumer.s.sol:DeployTestConsumer --rpc-url http://127.0.0.1:8545 --broadcast -vvvv
+make anvil-doctor   # optional: prints RPC/chain-id
+forge script script/DeployTestConsumer.s.sol:DeployTestConsumer --rpc-url http://127.0.0.1:8545 --chain-id 31337 --broadcast -vvvv
 ```
 
 4) Run the operator bot (Node.js, ethers v6):
@@ -149,6 +150,11 @@ node scripts/bot/operators-bot.js \
 ```
 
 You should see periodic submissions from 5 operators and the round finalizing on each cycle. You can query the consumer contract’s `latest()` to verify updated prices.
+
+### Network Shortcuts & Safety
+- Use `anvil-<target>` or `alphanet-<target>` prefixes (e.g., `anvil-deploy-factory`, `alphanet-create-feeds-json`). These set `RPC_URL` and `CHAIN_ID` for you.
+- `make doctor` prints your current `RPC_URL`, `CHAIN_ID`, and the live chain-id at the RPC to help diagnose mismatches.
+- All script targets verify the remote chain-id before broadcasting and sign with the provided chain-id (prevents domain/signature mismatches).
 
 ---
 

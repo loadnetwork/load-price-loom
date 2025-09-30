@@ -9,7 +9,10 @@ Scenarios, commands, and copy‑paste snippets for common tasks.
 ## New Oracle + Factory + Feeds + Adapters (One Shot)
 ```bash
 export ADMIN=0xAdmin
-make bootstrap-all RPC_URL=$ALPHA_RPC_URL
+# Alphanet shortcut
+make alphanet-bootstrap-all
+# or local Anvil
+make anvil-bootstrap-all FEEDS_FILE=feeds-anvil.json
 ```
 
 ## Modular Flow (Production)
@@ -17,16 +20,16 @@ make bootstrap-all RPC_URL=$ALPHA_RPC_URL
 2) Deploy factory bound to oracle
 ```bash
 export ORACLE=0xOracle
-make deploy-factory RPC_URL=$ALPHA_RPC_URL
+make alphanet-deploy-factory
 ```
 3) Create feeds from JSON
 ```bash
-make create-feeds-json ORACLE=$ORACLE FEEDS_FILE=feeds.json RPC_URL=$ALPHA_RPC_URL
+make alphanet-create-feeds-json ORACLE=$ORACLE FEEDS_FILE=feeds.json
 ```
 4) Deploy adapters
 ```bash
 export FACTORY=0xFactory
-make deploy-adapters-json FACTORY=$FACTORY FEEDS_FILE=feeds.json RPC_URL=$ALPHA_RPC_URL
+make alphanet-deploy-adapters-json FACTORY=$FACTORY FEEDS_FILE=feeds.json
 ```
 
 ## Create One Feed (Env‑Driven)
@@ -38,7 +41,7 @@ export HEARTBEAT_SEC=3600 DEVIATION_BPS=50 TIMEOUT_SEC=900
 export MIN_PRICE=0 MAX_PRICE=10000000000000000000000
 export DESCRIPTION="AR/byte"
 export OPERATORS_JSON='["0xOp1","0xOp2","0xOp3"]'
-make create-feed-env RPC_URL=$ALPHA_RPC_URL
+make alphanet-create-feed-env
 ```
 
 ## Pause, Poke, Config Changes
@@ -48,7 +51,7 @@ cast send $ORACLE "pause()" --rpc-url $RPC_URL --private-key $PK
 ```
 - Poke feeds from JSON (while paused is allowed):
 ```bash
-make poke-feeds-json ORACLE=$ORACLE FEEDS_FILE=feeds.json RPC_URL=$ALPHA_RPC_URL
+make alphanet-poke-feeds-json ORACLE=$ORACLE FEEDS_FILE=feeds.json
 ```
 - Update config (ensure no open round for that feed):
 ```bash
@@ -79,3 +82,7 @@ require(block.timestamp - updatedAt <= MAX_DELAY, "stale-age");
 ## Off‑Chain Signing (TS, ethers v6)
 See README or `docs/operator-guide.md` for a complete example.
 
+## Network Safety & Diagnostics
+- Use `anvil-<target>` or `alphanet-<target>` prefixed make targets to auto-set RPC_URL and CHAIN_ID.
+- `make doctor` prints the selected RPC/CHAIN_ID and the live chain-id from the RPC.
+- All script targets verify the remote chain-id before broadcasting and pass `--chain-id` to sign with the correct domain.

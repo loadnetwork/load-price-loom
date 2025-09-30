@@ -17,13 +17,20 @@ forge build
 forge test
 ```
 
-## Defaults (Alphanet)
-- Chain ID: `9496`
-- RPC: `https://alphanet.load.network`
-Set envs (or copy `.env.example`):
+## Network Shortcuts
+- Alphanet: chain-id `9496`, RPC `https://alphanet.load.network`
+- Anvil (local): chain-id `31337` by default; you can start it with `--chain-id 9496` to mirror Alphanet for EIP‑712 domains.
+
+Use prefixed make targets to auto-set RPC and chain-id:
 ```bash
-export ALPHA_RPC_URL=https://alphanet.load.network
-export CHAIN_ID=9496
+# Alphanet
+make alphanet-deploy-factory
+
+# Anvil
+make anvil-bootstrap-all FEEDS_FILE=feeds-anvil.json
+
+# Diagnostics
+make doctor      # prints RPC_URL/CHAIN_ID and remote chain-id
 ```
 
 ## One‑Command Bootstrap
@@ -31,7 +38,7 @@ Deploy a fresh oracle and factory, then create feeds and deterministic adapters 
 ```bash
 # ADMIN is the on-chain admin address that receives roles
 export ADMIN=0xYourAdminAddress
-make bootstrap-all RPC_URL=$ALPHA_RPC_URL
+make alphanet-bootstrap-all
 ```
 Outputs include oracle/factory addresses and adapter addresses per feed.
 
@@ -39,16 +46,16 @@ Outputs include oracle/factory addresses and adapter addresses per feed.
 Prefer this route for production:
 ```bash
 # 1) Deploy oracle manually or via your own script
-# 2) Deploy factory bound to oracle
+# 2) Deploy factory bound to oracle (Alphanet)
 export ORACLE=0xOracle
-make deploy-factory RPC_URL=$ALPHA_RPC_URL
+make alphanet-deploy-factory
 
 # 3) Create feeds from feeds.json
-make create-feeds-json ORACLE=$ORACLE RPC_URL=$ALPHA_RPC_URL
+make alphanet-create-feeds-json ORACLE=$ORACLE
 
 # 4) Deploy deterministic adapters
 export FACTORY=0xFactory
-make deploy-adapters-json FACTORY=$FACTORY RPC_URL=$ALPHA_RPC_URL
+make alphanet-deploy-adapters-json FACTORY=$FACTORY
 ```
 
 ## Running an Operator
@@ -56,4 +63,3 @@ See `docs/operator-guide.md` for a copy‑paste EIP‑712 signing example (ether
 
 ## Consuming Prices
 DeFi‑style consumers can read via the adapter (`AggregatorV3Interface`) or directly from the oracle. See `docs/consumer-guide.md` for code snippets and freshness checks.
-
