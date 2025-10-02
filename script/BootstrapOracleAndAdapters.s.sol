@@ -9,21 +9,27 @@ import {PriceLoomOracle} from "src/oracle/PriceLoomOracle.sol";
 import {OracleTypes} from "src/oracle/PriceLoomTypes.sol";
 import {PriceLoomAdapterFactory} from "src/adapter/PriceLoomAdapterFactory.sol";
 
-/// Deploys a new Oracle and Adapter Factory, then creates feeds from FEEDS_FILE and
-/// deploys deterministic adapters for each feed in one run.
-/// Env:
-///  - ADMIN: admin address for the oracle (granted DEFAULT_ADMIN/PAUSER/FEED_ADMIN roles)
-///  - FEEDS_FILE: path to JSON file (default: feeds.json)
 contract BootstrapOracleAndAdapters is Script {
     using stdJson for string;
 
     function run() external {
         address admin = vm.envAddress("ADMIN");
-        string memory file = vm.envOr("FEEDS_FILE", string("feeds.json"));
+        uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
+        string memory file = vm.envOr("FEEDS_FILE", string("feeds/feeds.json"));
         string memory json = vm.readFile(file);
-        uint256 n = json.readUint(".feeds.length");
 
-        vm.startBroadcast();
+        // Count feeds by checking for the .id field specifically
+        uint256 n = 0;
+        for (uint256 i = 0; i < 1000; i++) {
+            string memory idPath = string.concat(".feeds[", vm.toString(i), "].id");
+            try vm.parseJsonString(json, idPath) returns (string memory) {
+                n++;
+            } catch {
+                break;
+            }
+        }
+
+        vm.startBroadcast(adminPrivateKey);
         PriceLoomOracle oracle = new PriceLoomOracle(admin);
         PriceLoomAdapterFactory factory = new PriceLoomAdapterFactory(oracle);
         console2.log("Oracle :");
@@ -31,7 +37,6 @@ contract BootstrapOracleAndAdapters is Script {
         console2.log("Factory:");
         console2.logAddress(address(factory));
 
-        // Write simple addresses file for Makefile parsing
         string memory outPath = "out/e2e-addresses.txt";
         vm.writeFile(outPath, "");
         vm.writeLine(outPath, string.concat("oracle=", vm.toString(address(oracle))));
@@ -39,19 +44,21 @@ contract BootstrapOracleAndAdapters is Script {
 
         for (uint256 i = 0; i < n; i++) {
             string memory idx = vm.toString(i);
-            string memory idStr = json.readString(string.concat(".feeds[", idx, "].id"));
+            string memory basePath = string.concat(".feeds[", idx, "]");
+
+            string memory idStr = json.readString(string.concat(basePath, ".id"));
             bytes32 feedId = keccak256(abi.encodePacked(idStr));
 
-            uint8 decimals = uint8(json.readUint(string.concat(".feeds[", idx, "].decimals")));
-            uint8 minSubs = uint8(json.readUint(string.concat(".feeds[", idx, "].minSubmissions")));
-            uint8 maxSubs = uint8(json.readUint(string.concat(".feeds[", idx, "].maxSubmissions")));
-            uint32 heartbeat = uint32(json.readUint(string.concat(".feeds[", idx, "].heartbeatSec")));
-            uint32 deviation = uint32(json.readUint(string.concat(".feeds[", idx, "].deviationBps")));
-            uint32 timeout = uint32(json.readUint(string.concat(".feeds[", idx, "].timeoutSec")));
-            int256 minPrice = vm.parseInt(json.readString(string.concat(".feeds[", idx, "].minPrice")));
-            int256 maxPrice = vm.parseInt(json.readString(string.concat(".feeds[", idx, "].maxPrice")));
-            string memory desc = json.readString(string.concat(".feeds[", idx, "].description"));
-            address[] memory ops = json.readAddressArray(string.concat(".feeds[", idx, "].operators"));
+            uint8 decimals = uint8(json.readUint(string.concat(basePath, ".decimals")));
+            uint8 minSubs = uint8(json.readUint(string.concat(basePath, ".minSubmissions")));
+            uint8 maxSubs = uint8(json.readUint(string.concat(basePath, ".maxSubmissions")));
+            uint32 heartbeat = uint32(json.readUint(string.concat(basePath, ".heartbeatSec")));
+            uint32 deviation = uint32(json.readUint(string.concat(basePath, ".deviationBps")));
+            uint32 timeout = uint32(json.readUint(string.concat(basePath, ".timeoutSec")));
+            int256 minPrice = vm.parseInt(json.readString(string.concat(basePath, ".minPrice")));
+            int256 maxPrice = vm.parseInt(json.readString(string.concat(basePath, ".maxPrice")));
+            string memory desc = json.readString(string.concat(basePath, ".description"));
+            address[] memory ops = json.readAddressArray(string.concat(basePath, ".operators"));
 
             OracleTypes.FeedConfig memory cfg = OracleTypes.FeedConfig({
                 decimals: decimals,
@@ -77,7 +84,6 @@ contract BootstrapOracleAndAdapters is Script {
             console2.log("Adapter deployed :");
             console2.logAddress(deployed);
 
-            // Append feed/adapters info to addresses file
             vm.writeLine(
                 outPath,
                 string.concat(

@@ -8,7 +8,7 @@ CHAIN_ID ?= 9496
 # Helpers: quickly re-run any target under a specific network
 .PHONY: anvil-% alphanet-% doctor
 anvil-%:
-	@$(MAKE) $* RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337
+	@$(MAKE) $* RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337 ADMIN=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 FEEDS_FILE=feeds/feeds-anvil.json
 alphanet-%:
 	@$(MAKE) $* RPC_URL=$(ALPHA_RPC_URL) CHAIN_ID=9496
 
@@ -92,7 +92,7 @@ create-feed-env:
 bootstrap-all:
 	$(REQUIRE_CHAIN)
 	@if [ -z "$$ADMIN" ]; then echo "ADMIN env var required" && exit 1; fi
-	forge script script/BootstrapOracleAndAdapters.s.sol:BootstrapOracleAndAdapters --rpc-url "$(RPC_URL)" --chain-id $(CHAIN_ID) --broadcast -vvvv
+	forge script script/BootstrapOracleAndAdapters.s.sol:BootstrapOracleAndAdapters --rpc-url "$(RPC_URL)" --chain-id $(CHAIN_ID) --broadcast -vvvv 
 
 # End-to-end local demo using Anvil accounts and feeds-anvil.json
 # Requires: anvil running at RPC_URL; Node.js available
@@ -102,7 +102,7 @@ E2E_INTERVAL_MS ?= 30000
 e2e-demo:
 	@echo "[1/4] Bootstrapping oracle+factory+feeds+adapters from feeds-anvil.json"
 	ADMIN=$${ADMIN:-0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266} \
-	FEEDS_FILE=feeds-anvil.json \
+	FEEDS_FILE=feeds/feeds-anvil.json \
 	$(MAKE) bootstrap-all RPC_URL=$(RPC_URL) CHAIN_ID=$(CHAIN_ID)
 	@echo "[2/4] Extracting addresses from out/e2e-addresses.txt"
 	@( test -f out/e2e-addresses.txt ) || (echo "Missing out/e2e-addresses.txt; bootstrap failed?" && exit 1)

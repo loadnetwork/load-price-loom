@@ -18,7 +18,7 @@ contract DeployDeterministicAdaptersFromJson is Script {
         address factoryAddr = vm.envAddress("FACTORY");
         PriceLoomAdapterFactory factory = PriceLoomAdapterFactory(factoryAddr);
 
-        string memory file = vm.envOr("FEEDS_FILE", string("feeds.json"));
+        string memory file = vm.envOr("FEEDS_FILE", string("feeds/feeds.json"));
         string memory json = vm.readFile(file);
 
         uint256 n = json.readUint(".feeds.length");

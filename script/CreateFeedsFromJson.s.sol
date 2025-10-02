@@ -36,7 +36,7 @@ contract CreateFeedsFromJson is Script {
         address oracleAddr = vm.envAddress("ORACLE");
         IOracleAdmin oracle = IOracleAdmin(oracleAddr);
 
-        string memory file = vm.envOr("FEEDS_FILE", string("feeds.json"));
+        string memory file = vm.envOr("FEEDS_FILE", string("feeds/feeds.json"));
         string memory json = vm.readFile(file);
 
         uint256 n = json.readUint(".feeds.length");
