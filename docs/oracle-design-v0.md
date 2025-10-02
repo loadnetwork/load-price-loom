@@ -6,13 +6,17 @@
 - Freshness via heartbeat and deviation triggers; liveness via timeout and a public poke.
 - Public reads, plus Chainlink-compatible views via a per-feed adapter.
 
-## Key Defaults
-- Operators per feed: 5 (quorum 3, max 5).
-- Aggregation: median. For even counts, average the two middle values (round half up).
-- Decimals: 18 (answers expressed in AR per byte at 1e18 scale).
-- Winston conversion off-chain: `answer_18 = winston_per_byte * 1e6` (since `1 AR = 1e12 winston`).
-- Round gating: new round when `heartbeatSec` elapsed or `deviationBps` exceeded.
-- Finalization: when `maxSubmissions` reached or `timeoutSec` elapsed with `submissionCount ≥ minSubmissions`.
+## Key Configuration
+- **Operators per feed**: Configurable (typical: 5 operators, quorum 3, max 5)
+- **Aggregation**: Median. For even counts, average the two middle values (round half up)
+- **Decimals**: Per-feed configuration (no global default). Common choices:
+  - 8 decimals for price feeds (e.g., AR/byte examples use 8)
+  - 18 decimals for token amounts or high-precision feeds
+  - Choose based on your price range and precision needs
+- **Round gating**: New round when `heartbeatSec` elapsed or `deviationBps` exceeded
+- **Finalization**: When `maxSubmissions` reached or `timeoutSec` elapsed with `submissionCount ≥ minSubmissions`
+
+**Note**: All feed parameters (decimals, operators, heartbeat, etc.) are set per-feed via `createFeed()` and must be chosen explicitly.
 
 ## Contracts
 - `Oracle` (non-upgradeable v0; OpenZeppelin AccessControl, Pausable, EIP712, ReentrancyGuard).
@@ -27,10 +31,10 @@
 ## Data Model
 ```solidity
 struct FeedConfig {
-    uint8  decimals;       // default 18
-    uint8  minSubmissions; // default 3
-    uint8  maxSubmissions; // default 5
-    uint8  trim;           // default 0; reserved for future trimmed mean
+    uint8  decimals;       // per-feed (e.g., 8 for price feeds, 18 for tokens)
+    uint8  minSubmissions; // typical: 3
+    uint8  maxSubmissions; // typical: 5
+    uint8  trim;           // reserved for future trimmed mean (set to 0)
     uint32 heartbeatSec;
     uint32 deviationBps;   // e.g., 50 = 0.5%
     uint32 timeoutSec;

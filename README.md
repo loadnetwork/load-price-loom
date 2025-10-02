@@ -2,176 +2,185 @@
 
 Price Loom is a multi-feed, push-based price oracle for EVM chains. It features EIP-712 signed submissions for gas-efficient updates, on-chain median aggregation, and a Chainlink-compatible adapter for easy integration with the existing DeFi ecosystem.
 
-This document provides a comprehensive guide for developers, administrators, and operators.
-
-**Quick Links**
-- **[For Consumers: How to Read Prices](./docs/consumer-guide.md)**
-- **[For Operators: How to Push Prices](./docs/operator-guide.md)**
-- **[For Maintainers: Admin & Ops Guide](./docs/maintenance-guide.md)**
-- **[For Architects: Core Design Docs](./docs/oracle-design-v0.md)**
-
 ---
 
-## 1. Development Workflow
+## Documentation
 
-This section guides you through setting up the project, from first clone to running a local deployment.
+### Getting Started
+- **[Local Development Guide](./docs/local-development-guide.md)** - Setup Foundry/Anvil, run tests, debug transactions
+- **[Deployment Cookbook](./docs/deployment-cookbook.md)** - Deploy to local/testnet/mainnet with examples
+
+### Integration & Operations
+- **[Consumer Guide](./docs/consumer-guide.md)** - How to read prices in your contracts (includes 128-round history limits)
+- **[Operator Guide](./docs/operator-guide.md)** - Run a price submission node
+- **[Maintenance Guide](./docs/maintenance-guide.md)** - Manage feeds, operators, and configs
+- **[Adapter Guide](./docs/adapter-guide.md)** - Chainlink-compatible adapter architecture
+
+### Reference
+- **[Scripts & Bots](./scripts/README.md)** - Operator bot and integration testing tools
+- **[Oracle Design](./docs/oracle-design-v0.md)** - Architecture and technical specification
+- **[Phase Support Roadmap](./docs/phase-support-roadmap.md)** - Future upgrade path for production
+- **[Pre-Mainnet Checklist](./docs/pre-mainnet-checklist.md)** - Production readiness requirements
+
+## Quick Start
 
 ### Prerequisites
-- [Foundry](https://getfoundry.sh/)
+- [Foundry](https://getfoundry.sh/) (forge, cast, anvil)
+- [Node.js](https://nodejs.org/) v18+ (for operator bot)
 - [Git](https://git-scm.com/)
 
-### Initial Setup
+### Installation
 
-1.  **Clone & Install:** Clone the repository and install all dependencies.
-    ```bash
-    git clone <repository-url>
-    cd load-price-loom
-    git submodule update --init --recursive
-    forge install
-    ```
-
-2.  **Build & Test:** Ensure everything is working correctly by building the contracts and running the test suite.
-    ```bash
-    make test
-    ```
-
-### Local Quick Start: Running a Test Deployment
-
-This workflow lets you deploy and interact with the entire oracle system on a local Anvil node in minutes.
-
-1.  **Prepare Environment File:**
-    The deployment scripts use an `.env` file for private keys. The provided example file is pre-filled with standard Anvil test keys.
-    ```bash
-    cp .env.example .env
-    ```
-
-2.  **Start a Local Node:**
-    In a separate terminal, start a local Anvil node.
-    ```bash
-    # Default Anvil chain-id is 31337. If you want it to match Alphanet (9496), use:
-    # anvil --chain-id 9496
-    anvil
-    ```
-
-3.  **Deploy Everything:**
-    The `bootstrap-all` command deploys a new oracle, a new factory, and then configures all feeds and adapters from `feeds.json` in a single step. The `ADMIN` for the oracle will be Anvil's default deployer address, taken from the `PRIVATE_KEY` in your `.env` file.
-    ```bash
-    # This command reads .env for the ADMIN private key and RPC_URL
-    # Tip: use the anvil- prefix to auto-set RPC/chain-id for local dev
-    make anvil-bootstrap-all
-    ```
-    You will see the deployed addresses of the oracle and factory, followed by the feeds and adapters created.
-
----
-
-## 2. Production Deployment & Operations
-
-While `bootstrap-all` is great for testing, a production deployment requires a more deliberate, step-by-step approach for maximum safety and control.
-
-### Configuration
-
-- **`feeds.json`:** Before starting, ensure your `feeds.json` file is complete and accurate. This file is the source of truth for all feed parameters and operator sets for the target environment (e.g., mainnet).
-- **`.env`:** Create a `.env` file and populate it with the secure, production private keys and the correct `RPC_URL` for your target network.
-
-### Modular Deployment Workflow (Recommended)
-
-This workflow allows you to verify each major step before proceeding to the next.
-
-**Step 1: Deploy the Oracle**
-Manually deploy the `PriceLoomOracle` contract, passing the secure admin address (e.g., a Multi-Sig wallet) to the constructor. Note the deployed oracle address.
-
-**Step 2: Deploy the Adapter Factory**
 ```bash
-# Set the address of the newly deployed oracle
-export ORACLE=0xYourOracleAddress
-# Alphanet (chain-id 9496)
-make alphanet-deploy-factory
-# or, explicitly
-# make deploy-factory RPC_URL=https://alphanet.load.network CHAIN_ID=9496
-```
-Note the logged address of the new `PriceLoomAdapterFactory`.
+# Clone repository
+git clone <repository-url>
+cd load-price-loom
 
-**Step 3: Create On-Chain Feeds**
-This step reads `feeds.json` and calls `createFeed` for each entry.
-```bash
-export ORACLE=0xYourOracleAddress
-make alphanet-create-feeds-json
+# Install dependencies
+git submodule update --init --recursive
+forge install
+npm install
+
+# Build and test
+forge build
+forge test
 ```
 
-**Step 4: Deploy Feed Adapters**
-This deploys the deterministic `AggregatorV3Adapter` for each feed.
+### 5-Minute Local Demo
+
+Get a complete oracle system running in 3 terminals:
+
+**Terminal 1: Start Anvil**
 ```bash
-export FACTORY=0xYourFactoryAddress
-make alphanet-deploy-adapters-json
+anvil
 ```
 
-### Maintenance
-
-- **Adding/Modifying Feeds:** Update `feeds.json`, then re-run `make create-feeds-json` and `make deploy-adapters-json`.
-- **Emergency Operations:** For non-standard tasks, the `docs/maintenance-guide.md` provides lower-level `cast` commands for direct contract interaction (e.g., pausing, removing a single operator).
-- **Poking Stuck Rounds:** The `poke-feeds-json` target is a convenient way to handle timeouts for all feeds defined in your `feeds.json`.
-  ```bash
-  export ORACLE=0xYourOracleAddress
-  make alphanet-poke-feeds-json
-  ```
-
----
-
-## 3. End‑to‑End Local Demo (Anvil)
-
-This demo deploys a test feed (`ar/bytes-testv1`), a Chainlink adapter, a minimal consumer, and runs 5 local operators (Anvil accounts) that push prices every 30 seconds.
-
-1) Start Anvil in a separate terminal:
+**Terminal 2: Deploy & Run Bot**
 ```bash
-anvil --chain-id 31337
-```
-
-2) Bootstrap oracle + factory + feeds + adapters using the Anvil feed config:
-```bash
-export ADMIN=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266  # anvil[0]
-make anvil-bootstrap-all FEEDS_FILE=feeds-anvil.json
-```
-
-3) Deploy the example consumer bound to the adapter (set ADAPTER to the logged adapter address):
-```bash
-export ADAPTER=0xAdapter
-make anvil-doctor   # optional: prints RPC/chain-id
-forge script script/DeployTestConsumer.s.sol:DeployTestConsumer --rpc-url http://127.0.0.1:8545 --chain-id 31337 --broadcast -vvvv
-```
-
-4) Run the operator bot (Node.js, ethers v6):
-```bash
-npx --yes ethers@6.13.2  >/dev/null 2>&1 || true  # ensure ethers installed
-node scripts/bot/operators-bot.js \
+make anvil-bootstrap-all
+export ORACLE=0x5FbDB2315678afecb367f032d93F642f64180aa3  # Copy from output
+node scripts/bot/operators-bot.mjs \
   --rpc http://127.0.0.1:8545 \
-  --oracle 0xOracle \
+  --oracle $ORACLE \
   --feedDesc "ar/bytes-testv1" \
   --interval 30000
 ```
 
-You should see periodic submissions from 5 operators and the round finalizing on each cycle. You can query the consumer contract’s `latest()` to verify updated prices.
+**Terminal 3: Test Integration**
+```bash
+export ADAPTER=0xD916...  # Copy from Terminal 2
+forge script script/DeployTestConsumer.s.sol:DeployTestConsumer \
+  --rpc-url http://127.0.0.1:8545 \
+  --broadcast
 
-### Network Shortcuts & Safety
-- Use `anvil-<target>` or `alphanet-<target>` prefixes (e.g., `anvil-deploy-factory`, `alphanet-create-feeds-json`). These set `RPC_URL` and `CHAIN_ID` for you.
-- `make doctor` prints your current `RPC_URL`, `CHAIN_ID`, and the live chain-id at the RPC to help diagnose mismatches.
-- All script targets verify the remote chain-id before broadcasting and sign with the provided chain-id (prevents domain/signature mismatches).
+export CONSUMER=0x6101...  # Copy from output
+node scripts/test-adapter-consumer.mjs
+```
+
+**Expected Result:** `✅ ALL TESTS PASSED!`
+
+📚 **Next Steps:** See the [Local Development Guide](./docs/local-development-guide.md) for detailed workflows, debugging, and Foundry commands.
 
 ---
 
-## 4. Operating a Price Node
+## Production Deployment
 
-An operator is responsible for running an off-chain service that provides reliable and timely price data. For a full implementation guide, refer to **`docs/operator-guide.md`**.
+For production deployments, see the **[Deployment Cookbook](./docs/deployment-cookbook.md)** which provides:
+- Step-by-step deployment commands with expected outputs
+- Modular workflow for testnet/mainnet
+- Feed and adapter deployment examples
+- Verification commands
 
-### Operator Responsibilities
+**Production deployment overview:**
+1. Deploy `PriceLoomOracle` with secure admin (Multi-Sig)
+2. Deploy `PriceLoomAdapterFactory` bound to oracle
+3. Create feeds from `feeds.json` configuration
+4. Deploy Chainlink-compatible adapters for each feed
+5. Verify deployment and run integration tests
 
-1.  **Secure Key Management:** Your operator key is critical. **Do not expose it.** Use a secure vault, KMS, or HSM in production.
-2.  **Data Redundancy:** Your service should fetch data from multiple, highly-reliable sources and have logic to handle unresponsive or outlier APIs.
-3.  **Reliable Infrastructure:** Run your service on a resilient server with monitoring and alerting to ensure high uptime.
+See the [Pre-Mainnet Checklist](./docs/pre-mainnet-checklist.md) before production deployment.
 
-### Submission Workflow
+---
 
-The core logic is detailed in the operator guide, but involves:
-1.  Fetching and validating prices from your sources.
-2.  Constructing an EIP-712 `PriceSubmission` message.
-3.  Signing the message with your operator key.
-4.  Submitting the signature to the oracle via the `submitSigned` function.
+## Operations & Maintenance
+
+### For Operators
+
+Run a price submission node to provide reliable price data. See **[Operator Guide](./docs/operator-guide.md)** for:
+- Key management and security best practices
+- EIP-712 signature construction
+- Submission workflow and error handling
+- Production monitoring and alerting
+
+**Quick test with operator bot:**
+```bash
+node scripts/bot/operators-bot.mjs \
+  --rpc https://alphanet.load.network \
+  --oracle 0xYourOracleAddress \
+  --feedDesc "AR/byte" \
+  --interval 30000
+```
+
+### For Maintainers
+
+Manage feeds, operators, and configs. See **[Maintenance Guide](./docs/maintenance-guide.md)** for:
+- Pausing/unpausing oracle
+- Adding/removing operators
+- Updating feed configurations
+- Handling stuck rounds
+- Integration testing after changes
+
+**Quick reference:**
+```bash
+# Pause oracle
+cast send $ORACLE "pause()" --rpc-url $RPC_URL --private-key $PK
+
+# Add operator to feed
+cast send $ORACLE "addOperator(bytes32,address)" $FEED_ID $OPERATOR --rpc-url $RPC_URL --private-key $PK
+
+# Unpause oracle
+cast send $ORACLE "unpause()" --rpc-url $RPC_URL --private-key $PK
+```
+
+---
+
+## Architecture & Design
+
+### Core Components
+
+- **PriceLoomOracle**: Multi-feed oracle with EIP-712 submissions and median aggregation
+- **PriceLoomAdapterFactory**: Deploys Chainlink-compatible adapters
+- **AggregatorV3Adapter**: Chainlink interface wrapper for single feed
+- **Operator Bot**: Automated price submission service (testing/reference)
+
+### Key Features
+
+- **Multi-feed architecture**: One oracle contract manages multiple price feeds
+- **EIP-712 signatures**: Gas-efficient off-chain signing for submissions
+- **Median aggregation**: On-chain median calculation from operator submissions
+- **Chainlink compatibility**: Drop-in replacement via adapter interface
+- **Pause/unpause**: Emergency pause for maintenance operations
+- **Round timeout**: Automatic stale price handling with roll-forward
+
+See **[Oracle Design](./docs/oracle-design-v0.md)** for complete technical specification.
+
+---
+
+## Network Shortcuts
+
+Use make targets with network prefixes for convenience:
+
+```bash
+# Local Anvil (auto-sets RPC=http://127.0.0.1:8545, CHAIN_ID=31337)
+make anvil-bootstrap-all
+make anvil-deploy-factory
+
+# Alphanet (auto-sets RPC=https://alphanet.load.network, CHAIN_ID=9496)
+make alphanet-deploy-factory
+make alphanet-create-feeds-json
+
+# Check configuration
+make doctor  # Prints RPC_URL, CHAIN_ID, and live chain-id
+```
+
+All targets verify chain-id before broadcasting to prevent signature mismatches.

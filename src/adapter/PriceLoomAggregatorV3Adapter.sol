@@ -5,7 +5,16 @@ import {AggregatorV3Interface} from "../interfaces/AggregatorV3Interface.sol";
 import {IOracleReader} from "../interfaces/IOracleReader.sol";
 import {OracleTypes} from "../oracle/PriceLoomTypes.sol";
 
-// One adapter per feedId. Presents Chainlink AggregatorV3Interface for compatibility.
+// TODO: [PRODUCTION] This adapter uses single-phase round IDs.
+// For mainnet, implement PriceLoomPhaseAwareAdapter to support:
+//   1. Oracle upgrades without changing adapter address
+//   2. Historical round ID continuity across phases
+//   3. Phase encoding: roundId = (phaseId << 64) | aggregatorRoundId
+// See: docs/phase-support-roadmap.md
+// Current Limitation: If oracle address changes, historical round IDs become invalid
+
+/// @notice One adapter per feedId. Presents Chainlink AggregatorV3Interface for compatibility.
+/// @dev Single-phase implementation: suitable for testing/v1, requires phase support for production
 contract PriceLoomAggregatorV3Adapter is AggregatorV3Interface {
     IOracleReader public immutable oracle;
     bytes32 public immutable feedId;

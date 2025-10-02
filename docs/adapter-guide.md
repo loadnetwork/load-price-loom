@@ -7,6 +7,23 @@
   - Plug-and-play with existing Chainlink consumers.
   - No duplication of logic; adapter is read-only and minimal.
 
+## ⚠️ Production Considerations
+
+### Round ID Continuity
+
+The current adapter implementation (`PriceLoomAggregatorV3Adapter`) uses **single-phase round IDs**. This means:
+
+- ✅ Works perfectly for single oracle deployments
+- ❌ **Historical round IDs break if oracle address changes**
+- ❌ **Consumers must be updated manually when upgrading oracle**
+
+For production mainnet deployments, implement **phase-aware adapters** to support:
+- Stable adapter address across oracle upgrades
+- Historical continuity (old round IDs remain valid)
+- Chainlink-compatible phase encoding: `roundId = (phaseId << 64) | aggregatorRoundId`
+
+See [phase-support-roadmap.md](./phase-support-roadmap.md) for full implementation details and [pre-mainnet-checklist.md](./pre-mainnet-checklist.md) for deployment planning.
+
 ## Architecture
 - `PriceLoomAggregatorV3Adapter` stores:
   - `IOracleReader oracle` (core oracle address)
@@ -44,22 +61,34 @@
 - For stable, predictable addresses per `feedId`, use:
   - `factory.deployAdapterDeterministic(feedId)`
 - Address is computed with salt = `feedId`. A second call with the same salt reverts.
-- Predict on-chain via factory helper:
-  - `factory.computeAdapterAddress(feedId) -> address`
-- Off-chain (ethers v5):
-```ts
-import { getCreate2Address, keccak256, defaultAbiCoder, hexConcat } from "ethers/lib/utils";
-import { utils } from "ethers";
 
-const initCode = hexConcat([
-  // creation code
-  PriceLoomAggregatorV3Adapter__factory.bytecode,
-  // constructor args (oracle, feedId)
-  defaultAbiCoder.encode(["address","bytes32"],[oracle, feedId])
-]);
-const initCodeHash = keccak256(initCode);
-const predicted = getCreate2Address(factory, feedId, initCodeHash);
-```
+**Predicting addresses:**
+
+- **On-chain** (recommended):
+  ```solidity
+  address predicted = factory.computeAdapterAddress(feedId);
+  ```
+
+- **Off-chain with ethers v6**:
+  ```ts
+  import { ethers } from "ethers";
+
+  // Get factory contract
+  const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
+
+  // Use factory helper to predict address
+  const predictedAddress = await factory.computeAdapterAddress(feedId);
+
+  // Or compute manually with CREATE2:
+  const initCode = ethers.concat([
+    adapterBytecode,
+    ethers.AbiCoder.defaultAbiCoder().encode(["address", "bytes32"], [oracle, feedId])
+  ]);
+  const initCodeHash = ethers.keccak256(initCode);
+  const predicted = ethers.getCreate2Address(factory, feedId, initCodeHash);
+  ```
+
+**Note:** Using the factory's `computeAdapterAddress()` is simpler and more reliable than manual CREATE2 calculation.
 
 ## Consumer Usage
 - Solidity (typical Chainlink consumer):
@@ -99,7 +128,51 @@ const decimals = await feed.decimals();
 - Adapter validity: The adapter constructor checks that the feed exists in the oracle. This prevents deploying unusable adapters for non-existent feeds.
 - Feed naming: prefer stable descriptors like `"AR/byte"` and version suffixes when needed, e.g., `"AR/byte:v1"`.
 
+## Testing Integration
+
+After deploying adapters, verify the full stack with the integration test script:
+
+```bash
+# Set deployed addresses
+export ORACLE=0x5FbDB2315678afecb367f032d93F642f64180aa3
+export ADAPTER=0xD9164F568A7d21189F61bd53502BdE277883A0A2
+export CONSUMER=0x610178dA211FEF7D417bC0e6FeD39F05609AD788
+
+# Run integration test
+node scripts/test-adapter-consumer.mjs
+```
+
+This tests:
+1. **Oracle**: Fetches `latestRoundData(feedId)` and `getConfig(feedId)`
+2. **Adapter**: Verifies Chainlink-compatible interface returns same data
+3. **Consumer**: Confirms consumer contract reads correctly through adapter
+4. **Historical Data**: Tests `getRoundData(roundId)` for past rounds
+
+Expected output:
+```
+✅ Latest Round Data:
+   Round ID:     11
+   Answer:       9992000030 (99.9200003)
+   Decimals:     8
+
+✅ Adapter data matches Oracle
+✅ Consumer data matches Oracle & Adapter
+```
+
+See `scripts/test-adapter-consumer.mjs` for the full test implementation.
+
 ## Troubleshooting
 - If a Chainlink-based dapp shows wrong decimals/description, verify feed config in the oracle.
 - If consumers rely on historical `getRoundData`, either revert in adapter (to fail fast) or implement historical storage in the core before enabling those paths.
 - For multiple feeds, confirm you deployed one adapter per distinct `feedId`.
+- If integration test fails with "No data present", ensure operator bot has submitted prices (see [Operator Guide](./operator-guide.md)).
+
+---
+
+## Related Documentation
+
+- **[Consumer Guide](./consumer-guide.md)** - How to read prices via adapters in your contracts
+- **[Deployment Cookbook](./deployment-cookbook.md)** - Deploy adapters with factory
+- **[Scripts & Bots](../scripts/README.md)** - Integration testing tools
+- **[Phase Support Roadmap](./phase-support-roadmap.md)** - Future upgrade path for production
+- **[Pre-Mainnet Checklist](./pre-mainnet-checklist.md)** - Production readiness requirements

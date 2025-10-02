@@ -133,7 +133,9 @@ async function tick() {
     if (consecutiveFailures >= 2) {
       console.log(`🔧 Detected potential issue. Attempting poke() to force timeout handling...`);
       try {
-        const tx = await oracle.poke(FEED_ID);
+        // Use first operator's signer for poke()
+        const signer = new ethers.Wallet(KEYS[0], provider);
+        const tx = await oracle.connect(signer).poke(FEED_ID);
         await tx.wait();
         console.log(`  ✅ poke() succeeded - oracle state updated`);
         consecutiveFailures = 0;
