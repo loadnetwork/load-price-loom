@@ -75,22 +75,42 @@ For local testing and as a reference implementation, see `scripts/bot/operators-
 # Install dependencies
 npm install
 
-# Run the bot (local Anvil example)
+# Example 1: AR/Byte feed (18 decimals, ~1.5e-9 AR/byte)
 node scripts/bot/operators-bot.mjs \
   --rpc http://127.0.0.1:8545 \
   --oracle 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
   --feedDesc "ar/bytes-testv1" \
-  --interval 30000
+  --interval 30000 \
+  --priceBase 1.5e-9
+
+# Example 2: AR/USD feed (8 decimals, ~$6 per AR)
+node scripts/bot/operators-bot.mjs \
+  --rpc http://127.0.0.1:8545 \
+  --oracle 0x5FbDB2315678afecb367f032d93F642f64180aa3 \
+  --feedDesc "ar/usd-testv1" \
+  --interval 30000 \
+  --priceBase 6
 
 # Or with environment variables
 export RPC_URL=http://127.0.0.1:8545
 export ORACLE=0x5FbDB...
 export FEED_DESC="ar/bytes-testv1"
 export INTERVAL_MS=30000
+export PRICE_BASE=1.5e-9
 node scripts/bot/operators-bot.mjs
 ```
 
-**Note:** The test bot uses default Anvil keys. For production, set `PRIVATE_KEYS_JSON` environment variable.
+**Parameters:**
+- `--rpc`: RPC endpoint URL
+- `--oracle`: Oracle contract address
+- `--feedDesc`: Feed description string (e.g., "ar/bytes-testv1", "ar/usd-testv1")
+- `--interval`: Tick interval in milliseconds (default: 30000)
+- `--priceBase`: Base price value - the bot reads decimals from the oracle config automatically
+  - For AR/byte feeds: Use scientific notation (e.g., `1.5e-9`)
+  - For AR/USD feeds: Use regular numbers (e.g., `6`)
+  - The bot scales the price to the correct decimals automatically
+
+**Note:** The test bot uses default Anvil keys and generates random price variations around `priceBase` (±1%). For production, set `PRIVATE_KEYS_JSON` environment variable and implement real data source integration.
 
 ### Bot Features
 

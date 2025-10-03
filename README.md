@@ -59,11 +59,14 @@ anvil
 ```bash
 make anvil-bootstrap-all
 export ORACLE=0x5FbDB2315678afecb367f032d93F642f64180aa3  # Copy from output
+
+# Run bot for AR/byte feed (18 decimals)
 node scripts/bot/operators-bot.mjs \
   --rpc http://127.0.0.1:8545 \
   --oracle $ORACLE \
   --feedDesc "ar/bytes-testv1" \
-  --interval 30000
+  --interval 30000 \
+  --priceBase 1.5e-9
 ```
 
 **Terminal 3: Test Integration**
@@ -102,6 +105,39 @@ See the [Pre-Mainnet Checklist](./docs/pre-mainnet-checklist.md) before producti
 
 ---
 
+## Live Deployments
+
+### Alphanet (Load Network Testnet)
+
+**Network Details:**
+- RPC URL: `https://alphanet.load.network`
+- Chain ID: `9496`
+
+**Deployed Contracts:**
+```
+Oracle:  0x8A0ffF4C118767c818C9F8a30c39E8F9bB36CEd5
+Factory: 0x1ABCC90656DBAd9429B96A5deA14e5aBBEF6fAd5
+```
+
+**Feeds:**
+| Feed | Feed ID | Decimals | Adapter |
+|------|---------|----------|---------|
+| `ar/bytes-testv1` | `0x3f32666a158724369a9dd545820fe3317324bc95cc0955f73607bbfd95fee049` | 18 | `0xCbbbff18714b1276756980BA7691C67052C9C9ff` |
+| `ar/usd-testv1` | `0x826dd31c4b24704b320ca6210fa82fb8ebffc7b9c7b4bb36032ec09ac1b137f2` | 8 | `0x920380c14685b88Bb8f6D6A35def83D085152550` |
+
+**Usage Example:**
+```solidity
+// Import Chainlink interface
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+
+// Use AR/byte adapter
+AggregatorV3Interface feed = AggregatorV3Interface(0xCbbbff18714b1276756980BA7691C67052C9C9ff);
+(, int256 price, , uint256 updatedAt, ) = feed.latestRoundData();
+// price is in 18 decimals: 1.5e-9 AR/byte = 1500000000 (1.5e9)
+```
+
+---
+
 ## Operations & Maintenance
 
 ### For Operators
@@ -114,11 +150,21 @@ Run a price submission node to provide reliable price data. See **[Operator Guid
 
 **Quick test with operator bot:**
 ```bash
+# AR/byte feed (18 decimals, ~1.5e-9 AR/byte)
 node scripts/bot/operators-bot.mjs \
   --rpc https://alphanet.load.network \
   --oracle 0xYourOracleAddress \
-  --feedDesc "AR/byte" \
-  --interval 30000
+  --feedDesc "ar/bytes-testv1" \
+  --interval 30000 \
+  --priceBase 1.5e-9
+
+# AR/USD feed (8 decimals, ~$6 per AR)
+node scripts/bot/operators-bot.mjs \
+  --rpc https://alphanet.load.network \
+  --oracle 0xYourOracleAddress \
+  --feedDesc "ar/usd-testv1" \
+  --interval 30000 \
+  --priceBase 6
 ```
 
 ### For Maintainers

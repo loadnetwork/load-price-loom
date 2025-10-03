@@ -8,9 +8,9 @@ CHAIN_ID ?= 9496
 # Helpers: quickly re-run any target under a specific network
 .PHONY: anvil-% alphanet-% doctor
 anvil-%:
-	@$(MAKE) $* RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337 ADMIN=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 FEEDS_FILE=feeds/feeds-anvil.json
+	@$(MAKE) $* RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337 ADMIN=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 FEEDS_FILE=feeds/feeds-anvil.json FOUNDRY_PROFILE=script
 alphanet-%:
-	@$(MAKE) $* RPC_URL=$(ALPHA_RPC_URL) CHAIN_ID=9496
+	@$(MAKE) $* RPC_URL=$(ALPHA_RPC_URL) CHAIN_ID=9496 FOUNDRY_PROFILE=script
 
 # Preflight: ensure the RPC_URL chain id matches CHAIN_ID
 define REQUIRE_CHAIN
@@ -30,7 +30,7 @@ doctor:
 
 .PHONY: help build test fmt snapshot clean \
 	deploy-factory create-feeds-json deploy-adapters-json poke-feeds-json \
-	create-feed-env bootstrap-all e2e-demo e2e-clean
+	create-feed-env bootstrap-all show-addresses e2e-demo e2e-clean
 
 help:
 	@echo "Targets:"
@@ -45,6 +45,7 @@ help:
 	@echo "  poke-feeds-json       - Poke feeds from FEEDS_FILE (requires ORACLE)"
 	@echo "  create-feed-env       - Create a single feed from env vars (requires ORACLE, FEED_DESC, etc.)"
 	@echo "  bootstrap-all         - Deploy oracle+factory, then create feeds and adapters from FEEDS_FILE (requires ADMIN)"
+	@echo "  show-addresses        - Display deployed contract addresses from out/e2e-addresses.txt"
 
 build:
 	forge build
@@ -92,7 +93,32 @@ create-feed-env:
 bootstrap-all:
 	$(REQUIRE_CHAIN)
 	@if [ -z "$$ADMIN" ]; then echo "ADMIN env var required" && exit 1; fi
-	forge script script/BootstrapOracleAndAdapters.s.sol:BootstrapOracleAndAdapters --rpc-url "$(RPC_URL)" --chain-id $(CHAIN_ID) --broadcast -vvvv 
+	forge script script/BootstrapOracleAndAdapters.s.sol:BootstrapOracleAndAdapters --rpc-url "$(RPC_URL)" --chain-id $(CHAIN_ID) --broadcast --slow --gas-estimate-multiplier 300 -vvvv
+	@echo ""
+	@echo "✅ Deployment complete! Addresses saved to out/e2e-addresses.txt"
+	@echo ""
+	@echo "To set environment variables for the operator bot, run:"
+	@echo "  export ORACLE=\$$(awk -F= '/^oracle=/{print \$$2}' out/e2e-addresses.txt)"
+	@echo "  export FACTORY=\$$(awk -F= '/^factory=/{print \$$2}' out/e2e-addresses.txt)"
+	@echo ""
+	@echo "Or run: make show-addresses"
+
+show-addresses:
+	@if [ ! -f out/e2e-addresses.txt ]; then \
+	  echo "❌ No deployment found. Run 'make alphanet-bootstrap-all' first."; \
+	  exit 1; \
+	fi
+	@echo "📋 Deployed Addresses:"
+	@echo ""
+	@awk -F= '/^oracle=/{print "  ORACLE  = " $$2}' out/e2e-addresses.txt
+	@awk -F= '/^factory=/{print "  FACTORY = " $$2}' out/e2e-addresses.txt
+	@echo ""
+	@echo "📊 Feeds & Adapters:"
+	@awk '/^feed=/{print "  " $$0}' out/e2e-addresses.txt
+	@echo ""
+	@echo "To export as environment variables:"
+	@echo "  export ORACLE=\$$(awk -F= '/^oracle=/{print \$$2}' out/e2e-addresses.txt)"
+	@echo "  export FACTORY=\$$(awk -F= '/^factory=/{print \$$2}' out/e2e-addresses.txt)"
 
 # End-to-end local demo using Anvil accounts and feeds-anvil.json
 # Requires: anvil running at RPC_URL; Node.js available

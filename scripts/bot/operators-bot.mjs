@@ -20,6 +20,7 @@ const FEED_DESC = argv.feedDesc || process.env.FEED_DESC || "ar/bytes-testv1";
 const FEED_ID = argv.feedId || process.env.FEED_ID || keccak256(toUtf8Bytes(FEED_DESC));
 const INTERVAL = Number(argv.interval || process.env.INTERVAL_MS || 30000);
 const NUM_OPS = Number(argv.ops || process.env.NUM_OPS || 6);
+const PRICE_BASE = Number(argv.priceBase || process.env.PRICE_BASE || 6); // base price defaults to AR/usd, AR per byte is around 0.00000000199 AR (1.99e-9?)
 
 if (!ORACLE) {
   console.error("Missing --oracle");
@@ -57,8 +58,10 @@ const oracleAbi = [
 
 const oracle = new ethers.Contract(ORACLE, oracleAbi, provider);
 
-// random walk price generator around base
-let base = 100n * 10n ** 8n; // 100e8
+// Price generator - base will be set after reading decimals from oracle config
+let base = 0n;
+let decimals = 8; // Will be updated from oracle config
+
 function genPrice(i) {
   // +- 1% variation, operator-indexed
   const drift = BigInt((Math.floor(Math.random() * 200) - 100));
@@ -287,6 +290,20 @@ async function tick() {
 
 console.log(`🚀 Operator bot starting`);
 console.log(`   rpc=${RPC} oracle=${short(ORACLE)} feed=${FEED_DESC} (${FEED_ID}) ops=${NUM_OPS} interval=${INTERVAL}ms`);
+
+// Read feed config from oracle to get decimals
+// Config tuple: [decimals, minSubs, maxSubs, trim, heartbeat, deviation, timeout, minPrice, maxPrice, description]
+const cfg = await oracle.getConfig(FEED_ID);
+decimals = Number(cfg[0]); // decimals is the first field
+
+// Calculate base price scaled to the feed's decimals
+// For AR/byte (1.5e-9) with 18 decimals: 1.5e-9 * 1e18 = 1.5e9
+// For AR/USD (6) with 8 decimals: 6 * 1e8 = 6e8
+const scaledPrice = PRICE_BASE * Math.pow(10, decimals);
+base = BigInt(Math.floor(scaledPrice));
+
+console.log(`   📊 Feed: ${cfg[9]} (decimals=${decimals})`);
+console.log(`   💰 Base price: ${PRICE_BASE} → ${base} (scaled to ${decimals} decimals)`);
 
 // Initialize operators before starting
 await initOperators(oracle, FEED_ID);

@@ -28,23 +28,36 @@ make anvil-bootstrap-all
 ```bash
 # Copy oracle address from output above
 export ORACLE=0x5FbDB2315678afecb367f032d93F642f64180aa3
+
+# For AR/byte feed (18 decimals, ~1.5e-9 AR/byte)
 node scripts/bot/operators-bot.mjs \
   --rpc http://127.0.0.1:8545 \
   --oracle $ORACLE \
   --feedDesc "ar/bytes-testv1" \
-  --interval 30000
+  --interval 30000 \
+  --priceBase 1.5e-9
+
+# Or for AR/USD feed (8 decimals, ~$6 per AR)
+node scripts/bot/operators-bot.mjs \
+  --rpc http://127.0.0.1:8545 \
+  --oracle $ORACLE \
+  --feedDesc "ar/usd-testv1" \
+  --interval 30000 \
+  --priceBase 6
 ```
 
 **Expected Output:**
 ```
 🚀 Operator bot starting
+   📊 Feed: AR/byte (decimals=18)
+   💰 Base price: 1.5e-9 → 1500000000 (scaled to 18 decimals)
 ✅ Initialized 6/6 valid operator wallets
 📤 Starting new round 1 for ar/bytes-testv1
-  ✍️  0xf39F…2266 → 9923000000  ✅
-  ✍️  0x7099…79C8 → 9958000010  ✅
-  ✍️  0x3C44…93BC → 9981000020  ✅
+  ✍️  0xf39F…2266 → 1485000000  ✅
+  ✍️  0x7099…79C8 → 1515000010  ✅
+  ✍️  0x3C44…93BC → 1492000020  ✅
   ✅ Quorum (3) reached—skipping remaining operators
-🟢 latest round=1 answer=9981000020 age=1s changed=🔄
+🟢 latest round=1 answer=1492000020 age=1s changed=🔄
 ```
 
 ### 3. Test Integration
@@ -201,13 +214,54 @@ cast call $ADAPTER "decimals()" --rpc-url https://alphanet.load.network
 # decimals() returns: 8 (or your configured decimals)
 ```
 
+## Feed Configuration Best Practices
+
+### Choosing Decimals
+
+The `decimals` field determines price precision. Choose based on the value range:
+
+| Feed Type | Price Range | Recommended Decimals | Example |
+|-----------|-------------|---------------------|---------|
+| **AR/byte** | ~1.5e-9 AR | **18** | 1.5e-9 AR → 1,500,000,000 (18 decimals) |
+| **AR/USD** | ~$6 USD | **8** | $6 → 600,000,000 (8 decimals) |
+| **ETH/USD** | ~$2000 USD | **8** | $2000 → 200,000,000,000 (8 decimals) |
+| **Stablecoins** | ~$1 USD | **8** | $1 → 100,000,000 (8 decimals) |
+
+**Key Guidelines:**
+- **Use 18 decimals for very small values** (< 1e-6) to avoid rounding to zero
+- **Use 8 decimals for standard token/USD pairs** (Chainlink convention)
+- **For rebalancing/liquidation protocols**: Higher decimals = more precision for detecting small changes
+- **Decimals are immutable** after feed creation (requires new feed to change)
+
+### Example: AR/Byte Feed Configuration
+
+```json
+{
+  "id": "ar/bytes-v1",
+  "decimals": 18,
+  "description": "AR per byte",
+  "minSubmissions": 3,
+  "maxSubmissions": 5,
+  "heartbeatSec": 3600,
+  "deviationBps": 50,
+  "timeoutSec": 7200,
+  "minPrice": "0",
+  "maxPrice": "10000000000000000000000"
+}
+```
+
+**Calculation Example:**
+- Real price: `1.5e-9 AR/byte`
+- With 18 decimals: `1.5e-9 * 1e18 = 1,500,000,000`
+- Consumer calculation: `totalCost = (bytes * price) / 1e18`
+
 ## Create One Feed (Env‑Driven)
 
 ```bash
 # Set all feed parameters via environment variables
 export ORACLE=0x5FbDB2315678afecb367f032d93F642f64180aa3
 export FEED_DESC="AR/byte"
-export DECIMALS=8
+export DECIMALS=18  # Use 18 for AR/byte, 8 for AR/USD
 export MIN_SUBMISSIONS=2
 export MAX_SUBMISSIONS=3
 export HEARTBEAT_SEC=3600
@@ -226,7 +280,7 @@ make alphanet-create-feed-env
 ```
 Creating feed AR/byte...
   feedId: 0x3f32666a3e43d4d82c6c5b5e89e2d0b8c8fb4c8a9c20b7b0d8c6e8f8a4b2c6d8
-  decimals: 8
+  decimals: 18
   operators: 3
 ✅ Feed created successfully
 ```
