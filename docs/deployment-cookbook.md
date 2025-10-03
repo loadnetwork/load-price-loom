@@ -439,8 +439,9 @@ export ADAPTER=0xAdapterAddress
 forge script script/DeployTestConsumer.s.sol:DeployTestConsumer \
   --rpc-url $RPC_URL --broadcast --sender $ADMIN
 
-# Test integration
+# Test integration (specify which feed to test)
 export CONSUMER=0xConsumerAddress
+export FEED_DESC=ar/bytes-testv1  # Or ar/usd-testv1 for AR/USD feed
 node scripts/test-adapter-consumer.mjs
 ```
 
@@ -449,6 +450,28 @@ This tests:
 - Adapter Chainlink compatibility
 - Consumer reads through adapter
 - Historical data access
+
+**Testing different feeds:**
+
+```bash
+# Test AR/bytes feed (18 decimals)
+export RPC_URL=https://alphanet.load.network
+export ORACLE=0x8A0ffF4C118767c818C9F8a30c39E8F9bB36CEd5
+export ADAPTER=0xCbbbff18714b1276756980BA7691C67052C9C9ff
+export CONSUMER=0x5a65F24AEAd3154aFe3cc9c46806e3D4D2a00118
+export FEED_DESC=ar/bytes-testv1
+node scripts/test-adapter-consumer.mjs
+
+# Test AR/USD feed (8 decimals)
+export RPC_URL=https://alphanet.load.network
+export ORACLE=0x8A0ffF4C118767c818C9F8a30c39E8F9bB36CEd5
+export ADAPTER=0x920380c14685b88Bb8f6D6A35def83D085152550
+export CONSUMER=0xdb067EEFC660e1b38546e670aCAC08D970911fF2
+export FEED_DESC=ar/usd-testv1
+node scripts/test-adapter-consumer.mjs
+```
+
+**Important:** Make sure `FEED_DESC` matches the feed that the `ADAPTER` is bound to, otherwise the test will query the Oracle with the wrong feed ID and report mismatches.
 
 ## Network Safety & Diagnostics
 - Use `anvil-<target>` or `alphanet-<target>` prefixed make targets to auto-set RPC_URL and CHAIN_ID.

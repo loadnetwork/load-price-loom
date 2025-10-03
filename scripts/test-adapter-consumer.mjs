@@ -19,7 +19,7 @@ const RPC = process.env.RPC_URL || "http://127.0.0.1:8545";
 const ORACLE = process.env.ORACLE || "0x5FbDB2315678afecb367f032d93F642f64180aa3";
 const ADAPTER = process.env.ADAPTER || "0xD9164F568A7d21189F61bd53502BdE277883A0A2";
 const CONSUMER = process.env.CONSUMER || "0x610178dA211FEF7D417bC0e6FeD39F05609AD788";
-const FEED_DESC = "ar/bytes-testv1";
+const FEED_DESC = process.env.FEED_DESC || "ar/bytes-testv1";
 const FEED_ID = ethers.keccak256(ethers.toUtf8Bytes(FEED_DESC));
 
 const provider = new ethers.JsonRpcProvider(RPC);
