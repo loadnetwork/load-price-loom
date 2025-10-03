@@ -74,9 +74,9 @@ async function initOperators(oracle, feedId) {
     throw new Error("No operators found on-chain for this feed.");
   }
 
-  // Create a lookup map of address -> private key for the known test keys
+  // Create a lookup map of address -> private key for the available keys
   const addressToKey = new Map();
-  for (const key of ANVIL_KEYS) {
+  for (const key of KEYS) {
     const wallet = new ethers.Wallet(key);
     addressToKey.set(wallet.address.toLowerCase(), key);
   }
@@ -96,7 +96,7 @@ async function initOperators(oracle, feedId) {
   }
 
   if (wallets.length === 0) {
-    throw new Error("Could not initialize any operator wallets. Check that feeds.json operators match local anvil keys.");
+    throw new Error("Could not initialize any operator wallets. Check that on-chain operators have matching private keys in PRIVATE_KEYS_JSON or use default Anvil keys.");
   }
 
   // Overwrite the global KEYS array so the main loop uses the correct signers.
