@@ -121,11 +121,24 @@ cast call $FACTORY "computeAdapterAddress(bytes32)" $FEED_ID --rpc-url $RPC_URL
 ```
 
 ## New Oracle + Factory + Feeds + Adapters (One Shot)
+
+### For Alphanet (or other live networks)
+
 ```bash
-export ADMIN=0xAdmin
-# Alphanet shortcut
+# Set admin credentials
+export ADMIN=0xYourAdminAddress
+export ADMIN_PRIVATE_KEY=0xYourAdminPrivateKey
+
+# Deploy everything (uses --slow and --gas-estimate-multiplier 300 for alphanet)
 make alphanet-bootstrap-all
-# or local Anvil
+```
+
+**Note:** Alphanet deployment uses `--slow` flag to ensure transactions are processed sequentially and `--gas-estimate-multiplier 300` to account for higher gas requirements on alphanet.
+
+### For Local Anvil
+
+```bash
+# Anvil uses default test account
 make anvil-bootstrap-all FEEDS_FILE=feeds-anvil.json
 ```
 
@@ -444,9 +457,80 @@ This tests:
 
 ---
 
+## Troubleshooting
+
+### Deployment Fails with "Out of Gas" on Alphanet
+
+**Symptom:** Transactions succeed in simulation but fail when broadcast to alphanet.
+
+**Cause:** Alphanet has different gas economics than local simulation.
+
+**Solution:** The `bootstrap-all` target now uses `--slow` and `--gas-estimate-multiplier 300` by default. If you're using custom deployment scripts, add these flags:
+
+```bash
+forge script YourScript.s.sol:YourScript \
+  --rpc-url https://alphanet.load.network \
+  --chain-id 9496 \
+  --broadcast \
+  --slow \
+  --gas-estimate-multiplier 300
+```
+
+### Transaction Ordering Issues
+
+**Symptom:** Later transactions fail because they depend on earlier transactions that haven't confirmed yet.
+
+**Cause:** Multiple dependent transactions broadcast simultaneously.
+
+**Solution:** Use the `--slow` flag to wait for each transaction to confirm before sending the next one.
+
+### Operator Bot Can't Find Private Keys
+
+**Symptom:** Bot shows "Could not find private key for registered operator" warnings.
+
+**Cause:** The `PRIVATE_KEYS_JSON` environment variable is not set or contains keys that don't match on-chain operators.
+
+**Solution:**
+```bash
+# Verify your keys.json matches on-chain operators
+node -e "
+const keys = require('./keys.json');
+const { ethers } = require('ethers');
+keys.forEach((key, i) => {
+  const wallet = new ethers.Wallet(key);
+  console.log(\`[\${i}] \${wallet.address}\`);
+});
+"
+
+# Compare with on-chain operators
+cast call $ORACLE "getOperators(bytes32)" $FEED_ID --rpc-url $RPC_URL
+
+# Set PRIVATE_KEYS_JSON correctly
+export PRIVATE_KEYS_JSON=$(cat keys.json | jq -c)
+```
+
+### View Deployment Addresses
+
+After successful deployment, addresses are saved to `out/e2e-addresses.txt`:
+
+```bash
+# View all deployed addresses
+make show-addresses
+
+# Or manually extract
+cat out/e2e-addresses.txt
+
+# Export to environment variables
+export ORACLE=$(awk -F= '/^oracle=/{print $2}' out/e2e-addresses.txt)
+export FACTORY=$(awk -F= '/^factory=/{print $2}' out/e2e-addresses.txt)
+```
+
+---
+
 ## Related Documentation
 
 - **[Local Development Guide](./local-development-guide.md)** - Test deployments locally with Anvil
+- **[Systemd Deployment Guide](./systemd-deployment-guide.md)** - Deploy operator bot as systemd service on Ubuntu
 - **[Maintenance Guide](./maintenance-guide.md)** - Post-deployment operations
 - **[Operator Guide](./operator-guide.md)** - Run operator nodes after deployment
 - **[Scripts & Bots](../scripts/README.md)** - Operator bot and integration testing
